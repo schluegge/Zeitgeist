@@ -1,0 +1,28 @@
+{
+  "cases": [
+    {"id":"audit-clean","category":"repository_audit","input":{"branch":"infra/langgraph-orchestration","head":"abc123","status":[],"remotes":["origin","glass","zed"]},"expected":{"branch":"infra/langgraph-orchestration","head":"abc123","dirty":false,"remote_classes":{"origin":"owned","glass":"read_only","zed":"read_only"},"writes":0}},
+    {"id":"audit-dirty","category":"repository_audit","input":{"branch":"feature/x","head":"def456","status":[" M src/x.rs"],"remotes":["origin","glass","zed"]},"expected":{"branch":"feature/x","head":"def456","dirty":true,"remote_classes":{"origin":"owned","glass":"read_only","zed":"read_only"},"writes":0}},
+    {"id":"audit-detached","category":"repository_audit","input":{"branch":"","head":"789abc","status":[],"remotes":["origin"]},"expected":{"branch":"<detached>","head":"789abc","dirty":false,"remote_classes":{"origin":"owned"},"writes":0}},
+    {"id":"audit-unowned-remote","category":"repository_audit","input":{"branch":"main","head":"111aaa","status":[],"remotes":["origin","fork"]},"expected":{"branch":"main","head":"111aaa","dirty":false,"remote_classes":{"origin":"owned","fork":"unowned"},"writes":0}},
+    {"id":"route-gpui-docs","category":"routing","input":{"question":"What does the current GPUI documentation say about X?"},"expected":{"route":"grounded_docs"}},
+    {"id":"route-callers","category":"routing","input":{"question":"What calls this function?"},"expected":{"route":"code_review_graph"}},
+    {"id":"route-rust-definition","category":"routing","input":{"question":"Where is this exact Rust symbol defined?"},"expected":{"route":"rust_analyzer"}},
+    {"id":"route-taint","category":"routing","input":{"question":"Can this user-controlled input reach this database operation?"},"expected":{"route":"code_graph_rag"}},
+    {"id":"route-impact","category":"routing","input":{"question":"Which tests and callers are impacted by changing this function?"},"expected":{"route":"code_review_graph"}},
+    {"id":"route-rust-type","category":"routing","input":{"question":"What is the exact type of this Rust symbol?"},"expected":{"route":"rust_analyzer"}},
+    {"id":"git-glass","category":"git_safety","input":{"remote":"glass","expected_head":"abc","actual_head":"abc"},"expected":{"allowed":false}},
+    {"id":"git-zed","category":"git_safety","input":{"remote":"zed","expected_head":"abc","actual_head":"abc"},"expected":{"allowed":false}},
+    {"id":"git-stale-origin","category":"git_safety","input":{"remote":"origin","expected_head":"abc","actual_head":"def"},"expected":{"allowed":false}},
+    {"id":"recovery-command","category":"recovery","input":{"failure":"command_failure","retry_count":0},"expected":{"status":"RETRYING"}},
+    {"id":"recovery-stale-graph","category":"recovery","input":{"failure":"stale_graph","retry_count":0},"expected":{"status":"RETRYING"}},
+    {"id":"recovery-head","category":"recovery","input":{"failure":"changed_head","retry_count":0},"expected":{"status":"BLOCKED"}},
+    {"id":"recovery-test","category":"recovery","input":{"failure":"test_failure","retry_count":0},"expected":{"status":"FAILED"}},
+    {"id":"recovery-docs","category":"recovery","input":{"failure":"missing_documentation","retry_count":0},"expected":{"status":"BLOCKED"}},
+    {"id":"recovery-timeout","category":"recovery","input":{"failure":"tool_timeout","retry_count":0},"expected":{"status":"RETRYING"}},
+    {"id":"evidence-complete","category":"evidence","input":{"kinds":["preconditions_validated","effect_recorded","verification_passed","review_completed"]},"expected":{"complete":true}},
+    {"id":"evidence-no-verify","category":"evidence","input":{"kinds":["preconditions_validated","effect_recorded","review_completed"]},"expected":{"complete":false}},
+    {"id":"evidence-no-review","category":"evidence","input":{"kinds":["preconditions_validated","effect_recorded","verification_passed"]},"expected":{"complete":false}},
+    {"id":"idempotence-first","category":"idempotence","input":{"effect_key":"execute:task","completed_effects":[]},"expected":{"should_apply":true}},
+    {"id":"idempotence-repeat","category":"idempotence","input":{"effect_key":"execute:task","completed_effects":["execute:task"]},"expected":{"should_apply":false}}
+  ]
+}

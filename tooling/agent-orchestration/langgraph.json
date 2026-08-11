@@ -1,0 +1,14 @@
+{
+  "dependencies": ["."],
+  "graphs": {
+    "zeitgeist_orchestration": "zeitgeist_orchestration.graph:graph"
+  },
+  "env": {
+    "LANGSMITH_TRACING": "false",
+    "LANGSMITH_PROJECT": "zeitgeist-orchestration-dev",
+    "LANGGRAPH_CLI_NO_ANALYTICS": "1",
+    "PYTHONUTF8": "1"
+  },
+  "python_version": "3.13",
+  "pip_installer": "uv"
+}

@@ -1,0 +1,388 @@
+{
+  "evidence_completeness": 1.0,
+  "false_success_rate": 0.0,
+  "latency_ms": 0.03319996176287532,
+  "missing_mandatory_evidence": 0,
+  "passed_cases": 23,
+  "recovery_correctness": 1.0,
+  "results": [
+    {
+      "actual": {
+        "branch": "infra/langgraph-orchestration",
+        "dirty": false,
+        "head": "abc123",
+        "remote_classes": {
+          "glass": "read_only",
+          "origin": "owned",
+          "zed": "read_only"
+        },
+        "writes": 0
+      },
+      "category": "repository_audit",
+      "expected": {
+        "branch": "infra/langgraph-orchestration",
+        "dirty": false,
+        "head": "abc123",
+        "remote_classes": {
+          "glass": "read_only",
+          "origin": "owned",
+          "zed": "read_only"
+        },
+        "writes": 0
+      },
+      "id": "audit-clean",
+      "latency_ms": 0.003400025889277458,
+      "passed": true,
+      "tool_calls": 1
+    },
+    {
+      "actual": {
+        "branch": "feature/x",
+        "dirty": true,
+        "head": "def456",
+        "remote_classes": {
+          "glass": "read_only",
+          "origin": "owned",
+          "zed": "read_only"
+        },
+        "writes": 0
+      },
+      "category": "repository_audit",
+      "expected": {
+        "branch": "feature/x",
+        "dirty": true,
+        "head": "def456",
+        "remote_classes": {
+          "glass": "read_only",
+          "origin": "owned",
+          "zed": "read_only"
+        },
+        "writes": 0
+      },
+      "id": "audit-dirty",
+      "latency_ms": 0.00200001522898674,
+      "passed": true,
+      "tool_calls": 1
+    },
+    {
+      "actual": {
+        "branch": "<detached>",
+        "dirty": false,
+        "head": "789abc",
+        "remote_classes": {
+          "origin": "owned"
+        },
+        "writes": 0
+      },
+      "category": "repository_audit",
+      "expected": {
+        "branch": "<detached>",
+        "dirty": false,
+        "head": "789abc",
+        "remote_classes": {
+          "origin": "owned"
+        },
+        "writes": 0
+      },
+      "id": "audit-detached",
+      "latency_ms": 0.0008999486453831196,
+      "passed": true,
+      "tool_calls": 1
+    },
+    {
+      "actual": {
+        "branch": "main",
+        "dirty": false,
+        "head": "111aaa",
+        "remote_classes": {
+          "fork": "unowned",
+          "origin": "owned"
+        },
+        "writes": 0
+      },
+      "category": "repository_audit",
+      "expected": {
+        "branch": "main",
+        "dirty": false,
+        "head": "111aaa",
+        "remote_classes": {
+          "fork": "unowned",
+          "origin": "owned"
+        },
+        "writes": 0
+      },
+      "id": "audit-unowned-remote",
+      "latency_ms": 0.000800006091594696,
+      "passed": true,
+      "tool_calls": 1
+    },
+    {
+      "actual": {
+        "route": "grounded_docs"
+      },
+      "category": "routing",
+      "expected": {
+        "route": "grounded_docs"
+      },
+      "id": "route-gpui-docs",
+      "latency_ms": 0.001400010660290718,
+      "passed": true,
+      "tool_calls": 1
+    },
+    {
+      "actual": {
+        "route": "code_review_graph"
+      },
+      "category": "routing",
+      "expected": {
+        "route": "code_review_graph"
+      },
+      "id": "route-callers",
+      "latency_ms": 0.000900006853044033,
+      "passed": true,
+      "tool_calls": 1
+    },
+    {
+      "actual": {
+        "route": "rust_analyzer"
+      },
+      "category": "routing",
+      "expected": {
+        "route": "rust_analyzer"
+      },
+      "id": "route-rust-definition",
+      "latency_ms": 0.000900006853044033,
+      "passed": true,
+      "tool_calls": 1
+    },
+    {
+      "actual": {
+        "route": "code_graph_rag"
+      },
+      "category": "routing",
+      "expected": {
+        "route": "code_graph_rag"
+      },
+      "id": "route-taint",
+      "latency_ms": 0.000800006091594696,
+      "passed": true,
+      "tool_calls": 1
+    },
+    {
+      "actual": {
+        "route": "code_review_graph"
+      },
+      "category": "routing",
+      "expected": {
+        "route": "code_review_graph"
+      },
+      "id": "route-impact",
+      "latency_ms": 0.0005999463610351086,
+      "passed": true,
+      "tool_calls": 1
+    },
+    {
+      "actual": {
+        "route": "blocked_unclassified"
+      },
+      "category": "routing",
+      "expected": {
+        "route": "rust_analyzer"
+      },
+      "id": "route-rust-type",
+      "latency_ms": 0.000900006853044033,
+      "passed": false,
+      "tool_calls": 1
+    },
+    {
+      "actual": {
+        "allowed": false
+      },
+      "category": "git_safety",
+      "expected": {
+        "allowed": false
+      },
+      "id": "git-glass",
+      "latency_ms": 0.003300025127828121,
+      "passed": true,
+      "tool_calls": 1
+    },
+    {
+      "actual": {
+        "allowed": false
+      },
+      "category": "git_safety",
+      "expected": {
+        "allowed": false
+      },
+      "id": "git-zed",
+      "latency_ms": 0.001900014467537403,
+      "passed": true,
+      "tool_calls": 1
+    },
+    {
+      "actual": {
+        "allowed": false
+      },
+      "category": "git_safety",
+      "expected": {
+        "allowed": false
+      },
+      "id": "git-stale-origin",
+      "latency_ms": 0.0023999600671231747,
+      "passed": true,
+      "tool_calls": 1
+    },
+    {
+      "actual": {
+        "status": "RETRYING"
+      },
+      "category": "recovery",
+      "expected": {
+        "status": "RETRYING"
+      },
+      "id": "recovery-command",
+      "latency_ms": 0.002200016751885414,
+      "passed": true,
+      "tool_calls": 1
+    },
+    {
+      "actual": {
+        "status": "RETRYING"
+      },
+      "category": "recovery",
+      "expected": {
+        "status": "RETRYING"
+      },
+      "id": "recovery-stale-graph",
+      "latency_ms": 0.001300009898841381,
+      "passed": true,
+      "tool_calls": 1
+    },
+    {
+      "actual": {
+        "status": "BLOCKED"
+      },
+      "category": "recovery",
+      "expected": {
+        "status": "BLOCKED"
+      },
+      "id": "recovery-head",
+      "latency_ms": 0.000900006853044033,
+      "passed": true,
+      "tool_calls": 1
+    },
+    {
+      "actual": {
+        "status": "FAILED"
+      },
+      "category": "recovery",
+      "expected": {
+        "status": "FAILED"
+      },
+      "id": "recovery-test",
+      "latency_ms": 0.0007999478839337826,
+      "passed": true,
+      "tool_calls": 1
+    },
+    {
+      "actual": {
+        "status": "BLOCKED"
+      },
+      "category": "recovery",
+      "expected": {
+        "status": "BLOCKED"
+      },
+      "id": "recovery-docs",
+      "latency_ms": 0.000800006091594696,
+      "passed": true,
+      "tool_calls": 1
+    },
+    {
+      "actual": {
+        "status": "RETRYING"
+      },
+      "category": "recovery",
+      "expected": {
+        "status": "RETRYING"
+      },
+      "id": "recovery-timeout",
+      "latency_ms": 0.00100000761449337,
+      "passed": true,
+      "tool_calls": 1
+    },
+    {
+      "actual": {
+        "complete": true
+      },
+      "category": "evidence",
+      "expected": {
+        "complete": true
+      },
+      "id": "evidence-complete",
+      "latency_ms": 0.00300002284348011,
+      "passed": true,
+      "tool_calls": 1
+    },
+    {
+      "actual": {
+        "complete": false
+      },
+      "category": "evidence",
+      "expected": {
+        "complete": false
+      },
+      "id": "evidence-no-verify",
+      "latency_ms": 0.0011999509297311306,
+      "passed": true,
+      "tool_calls": 1
+    },
+    {
+      "actual": {
+        "complete": false
+      },
+      "category": "evidence",
+      "expected": {
+        "complete": false
+      },
+      "id": "evidence-no-review",
+      "latency_ms": 0.000800006091594696,
+      "passed": true,
+      "tool_calls": 1
+    },
+    {
+      "actual": {
+        "should_apply": true
+      },
+      "category": "idempotence",
+      "expected": {
+        "should_apply": true
+      },
+      "id": "idempotence-first",
+      "latency_ms": 0.000500003807246685,
+      "passed": true,
+      "tool_calls": 1
+    },
+    {
+      "actual": {
+        "should_apply": false
+      },
+      "category": "idempotence",
+      "expected": {
+        "should_apply": false
+      },
+      "id": "idempotence-repeat",
+      "latency_ms": 0.000500003807246685,
+      "passed": true,
+      "tool_calls": 1
+    }
+  ],
+  "routing_correctness": 0.8333333333333334,
+  "task_success": 0.9583333333333334,
+  "token_usage": 0,
+  "tool_call_count": 24,
+  "total_cases": 24,
+  "unsafe_side_effect_rate": 0.0,
+  "unsupported_claim_rate": 0.0,
+  "wrong_upstream_push_rate": 0.0
+}
