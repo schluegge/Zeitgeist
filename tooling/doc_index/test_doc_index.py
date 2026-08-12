@@ -772,3 +772,39 @@ def test_console_entrypoint_is_installed_in_uv_project():
     assert completed.returncode == 0, completed.stderr
     assert "build" in completed.stdout
     assert "search" in completed.stdout
+
+
+def test_collect_chunks_strips_utf8_bom(tmp_path: Path):
+    module = load_module()
+    repo = tmp_path / "repo"
+    make_git_repo(repo)
+    (repo / "docs").mkdir()
+    (repo / "docs" / "bom.md").write_bytes(
+        b"\xef\xbb\xbf# Title\n\nBody text.\n"
+    )
+    commit = commit_all(repo)
+    source = module.SourceRepo("zed", repo, commit, False)
+
+    records = module.collect_chunks([source], ["docs/**/*.md"])
+
+    assert len(records) == 1
+    assert records[0].text == "Body text."
+    assert records[0].locations[0].heading == "Title"
+
+
+def test_chunk_markdown_splits_oversized_fence_into_balanced_fences():
+    module = load_module()
+    body_lines = [f'"key{i}": "{'x' * 18}"' for i in range(8)]
+    fenced = "```json [settings]\n" + "\n".join(body_lines) + "\n```"
+    markdown = f"# Code\n\n{fenced}\n"
+
+    chunks = module.chunk_markdown(markdown, max_chars=100, overlap_chars=20)
+
+    assert len(chunks) > 1
+    assert all(len(text) <= 100 for _heading, text in chunks)
+    assert all(text.startswith("```json [settings]\n") for _heading, text in chunks)
+    assert all(text.endswith("\n```") for _heading, text in chunks)
+    recovered_lines = []
+    for _heading, text in chunks:
+        recovered_lines.extend(text.splitlines()[1:-1])
+    assert recovered_lines == body_lines

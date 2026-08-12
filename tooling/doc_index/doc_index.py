@@ -134,14 +134,49 @@ def _split_plain_text(text: str, max_chars: int, overlap_chars: int) -> list[str
     return pieces
 
 
+def _split_fenced_block(block: str, max_chars: int) -> list[str]:
+    if len(block) <= max_chars:
+        return [block]
+    lines = block.splitlines()
+    if len(lines) < 3:
+        raise ValueError("oversized fenced block has no splittable body")
+    opener = lines[0]
+    marker = "```" if opener.lstrip().startswith("```") else "~~~"
+    closer = lines[-1]
+    if not closer.lstrip().startswith(marker):
+        raise ValueError("oversized fenced block is not balanced")
+    available = max_chars - len(opener) - len(closer) - 2
+    if available <= 0:
+        raise ValueError("max_chars is too small to preserve fenced Markdown delimiters")
+
+    body_pieces: list[str] = []
+    current_lines: list[str] = []
+    for line in lines[1:-1]:
+        candidate = "\n".join([*current_lines, line])
+        if current_lines and len(candidate) > available:
+            body_pieces.append("\n".join(current_lines))
+            current_lines = []
+        if len(line) > available:
+            body_pieces.extend(line[start : start + available] for start in range(0, len(line), available))
+        else:
+            current_lines.append(line)
+    if current_lines:
+        body_pieces.append("\n".join(current_lines))
+    return [f"{opener}\n{body}\n{closer}" for body in body_pieces]
+
+
 def _pack_blocks(blocks: list[str], max_chars: int, overlap_chars: int) -> list[str]:
     packed: list[str] = []
     current = ""
     for block in blocks:
-        if block.startswith(("```", "~~~")):
-            pieces = [block]
-        else:
-            pieces = _split_plain_text(block, max_chars, overlap_chars)
+        is_fenced = block.startswith(("```", "~~~"))
+        if is_fenced and len(block) > max_chars:
+            if current:
+                packed.append(current)
+                current = ""
+            packed.extend(_split_fenced_block(block, max_chars))
+            continue
+        pieces = [block] if is_fenced else _split_plain_text(block, max_chars, overlap_chars)
         for piece in pieces:
             candidate = piece if not current else f"{current}\n\n{piece}"
             if len(candidate) <= max_chars:
@@ -243,7 +278,7 @@ def collect_chunks(
     for repository in sorted(repositories, key=lambda item: item.name):
         for path in discover_markdown(repository.path, include_globs):
             relative_path = path.relative_to(repository.path).as_posix()
-            markdown = path.read_text(encoding="utf-8")
+            markdown = path.read_text(encoding="utf-8-sig")
             for chunk_index, (heading, chunk_text) in enumerate(chunk_markdown(markdown)):
                 content_hash = hashlib.sha256(chunk_text.encode("utf-8")).hexdigest()
                 location = ChunkLocation(
