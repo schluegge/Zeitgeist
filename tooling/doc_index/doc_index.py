@@ -4,8 +4,13 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from collections.abc import Sequence
 import hashlib
+import json
 import re
 import subprocess
+from urllib import error as urllib_error
+from urllib import request as urllib_request
+
+import numpy as np
 
 
 @dataclass(frozen=True)
@@ -236,3 +241,70 @@ def collect_chunks(
                         raise ValueError(f"SHA-256 collision for chunk {content_hash}")
                     record.locations.append(location)
     return list(by_hash.values())
+
+
+class OllamaEmbedder:
+    def __init__(
+        self,
+        base_url: str = "http://localhost:11434",
+        model: str = "bge-m3",
+        timeout_seconds: float = 60.0,
+    ) -> None:
+        self.base_url = base_url.rstrip("/")
+        self.model = model
+        self.timeout_seconds = timeout_seconds
+
+    def embed(self, texts: Sequence[str]) -> np.ndarray:
+        if not texts:
+            raise ValueError("at least one text is required for embedding")
+        payload = json.dumps(
+            {"model": self.model, "input": list(texts), "truncate": False}
+        ).encode("utf-8")
+        request = urllib_request.Request(
+            f"{self.base_url}/api/embed",
+            data=payload,
+            headers={"Content-Type": "application/json"},
+            method="POST",
+        )
+        try:
+            with urllib_request.urlopen(request, timeout=self.timeout_seconds) as response:
+                raw_body = response.read()
+        except (urllib_error.HTTPError, urllib_error.URLError, TimeoutError, OSError) as exc:
+            raise RuntimeError(f"Ollama embedding request failed: {exc}") from exc
+
+        try:
+            decoded = json.loads(raw_body)
+        except (json.JSONDecodeError, UnicodeDecodeError) as exc:
+            raise RuntimeError("Ollama embedding response was not valid JSON") from exc
+
+        embeddings = decoded.get("embeddings") if isinstance(decoded, dict) else None
+        if not isinstance(embeddings, list):
+            raise RuntimeError("Ollama embedding response did not contain an embeddings array")
+        if len(embeddings) != len(texts):
+            raise RuntimeError(
+                f"Ollama returned {len(embeddings)} embeddings for {len(texts)} inputs"
+            )
+        if not embeddings or not all(isinstance(vector, list) for vector in embeddings):
+            raise RuntimeError("Ollama embedding response contained invalid vectors")
+
+        dimensions = {len(vector) for vector in embeddings}
+        if len(dimensions) != 1:
+            raise RuntimeError("Ollama embedding dimension mismatch within response")
+        dimension = next(iter(dimensions))
+        if dimension <= 0:
+            raise RuntimeError("Ollama returned zero-width embeddings")
+
+        try:
+            vectors = np.asarray(embeddings, dtype=np.float32)
+        except (TypeError, ValueError) as exc:
+            raise RuntimeError("Ollama embedding response contained non-numeric values") from exc
+        if vectors.ndim != 2 or vectors.shape != (len(texts), dimension):
+            raise RuntimeError("Ollama embedding response had an unexpected matrix shape")
+        if not np.isfinite(vectors).all():
+            raise RuntimeError("Ollama embedding response contained non-finite values")
+
+        norms = np.linalg.norm(vectors, axis=1)
+        if np.any(norms == 0):
+            raise RuntimeError("Ollama embedding response contained a zero vector")
+        normalized = vectors / norms[:, np.newaxis]
+        return normalized.astype(np.float32, copy=False)

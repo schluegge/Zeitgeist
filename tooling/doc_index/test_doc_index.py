@@ -1,11 +1,16 @@
 from __future__ import annotations
 
 import hashlib
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 import importlib.util
+import json
 from pathlib import Path
+import socket
 import subprocess
 import sys
+import threading
 
+import numpy as np
 import pytest
 
 
@@ -173,3 +178,86 @@ def test_collect_chunks_order_is_deterministic(tmp_path: Path):
 
     assert [(r.content_hash, r.text) for r in first] == [(r.content_hash, r.text) for r in second]
     assert [r.text for r in first] == ["Alpha", "Zulu"]
+
+
+def start_embed_server(response_body: bytes, status: int = 200):
+    requests: list[dict] = []
+
+    class Handler(BaseHTTPRequestHandler):
+        def do_POST(self):
+            length = int(self.headers.get("Content-Length", "0"))
+            body = self.rfile.read(length)
+            requests.append({"path": self.path, "json": json.loads(body)})
+            self.send_response(status)
+            self.send_header("Content-Type", "application/json")
+            self.end_headers()
+            self.wfile.write(response_body)
+
+        def log_message(self, format, *args):
+            return
+
+    server = ThreadingHTTPServer(("127.0.0.1", 0), Handler)
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    return server, requests
+
+
+def require_type(name: str):
+    module = load_module()
+    value = getattr(module, name, None)
+    if not isinstance(value, type):
+        pytest.fail(f"{name} is not implemented yet")
+    return value
+
+
+def test_ollama_embedder_batches_and_normalizes_float32_vectors():
+    response = json.dumps({"embeddings": [[3.0, 4.0], [0.0, 2.0]]}).encode()
+    server, requests = start_embed_server(response)
+    try:
+        embedder_type = require_type("OllamaEmbedder")
+        embedder = embedder_type(base_url=f"http://127.0.0.1:{server.server_port}", model="bge-m3")
+        vectors = embedder.embed(["first", "second"])
+    finally:
+        server.shutdown()
+        server.server_close()
+
+    assert vectors.dtype == np.float32
+    assert vectors.shape == (2, 2)
+    assert np.allclose(np.linalg.norm(vectors, axis=1), 1.0)
+    assert requests == [{
+        "path": "/api/embed",
+        "json": {"model": "bge-m3", "input": ["first", "second"], "truncate": False},
+    }]
+
+
+def test_ollama_embedder_rejects_mismatched_vector_dimensions():
+    response = json.dumps({"embeddings": [[1.0, 2.0], [1.0, 2.0, 3.0]]}).encode()
+    server, _ = start_embed_server(response)
+    try:
+        embedder = require_type("OllamaEmbedder")(base_url=f"http://127.0.0.1:{server.server_port}")
+        with pytest.raises(RuntimeError, match="dimension"):
+            embedder.embed(["first", "second"])
+    finally:
+        server.shutdown()
+        server.server_close()
+
+
+def test_ollama_embedder_rejects_malformed_json():
+    server, _ = start_embed_server(b"not-json")
+    try:
+        embedder = require_type("OllamaEmbedder")(base_url=f"http://127.0.0.1:{server.server_port}")
+        with pytest.raises(RuntimeError, match="JSON"):
+            embedder.embed(["text"])
+    finally:
+        server.shutdown()
+        server.server_close()
+
+
+def test_ollama_embedder_reports_unavailable_endpoint():
+    with socket.socket() as probe:
+        probe.bind(("127.0.0.1", 0))
+        port = probe.getsockname()[1]
+    embedder = require_type("OllamaEmbedder")(base_url=f"http://127.0.0.1:{port}")
+
+    with pytest.raises(RuntimeError, match="Ollama"):
+        embedder.embed(["text"])
