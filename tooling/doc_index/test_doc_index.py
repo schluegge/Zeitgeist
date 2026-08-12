@@ -849,11 +849,11 @@ def test_ollama_embedder_defaults_to_128_input_batches():
     assert [len(request["json"]["input"]) for request in requests] == [128, 128]
 
 
-def test_console_configuration_tolerates_unencodable_unicode():
+def test_console_configuration_forces_utf8_under_cp1252_environment():
     script = (
         "import doc_index; "
         "doc_index._configure_console_streams(); "
-        "print('done ✓')"
+        "print('done ' + chr(0x2713))"
     )
     environment = os.environ.copy()
     environment["PYTHONIOENCODING"] = "cp1252"
@@ -862,9 +862,32 @@ def test_console_configuration_tolerates_unencodable_unicode():
         cwd=MODULE_PATH.parent,
         env=environment,
         capture_output=True,
-        text=True,
-        encoding="cp1252",
     )
 
     assert completed.returncode == 0, completed.stderr
-    assert "done ?" in completed.stdout
+    assert completed.stdout.rstrip(b"\r\n") == ("done " + chr(0x2713)).encode("utf-8")
+
+
+def test_configure_console_streams_forces_utf8(monkeypatch):
+    module = load_module()
+
+    class FakeStream:
+        def __init__(self):
+            self.calls = []
+        def reconfigure(self, **kwargs):
+            self.calls.append(kwargs)
+
+    stdout = FakeStream()
+    stderr = FakeStream()
+    monkeypatch.setattr(module.sys, "stdout", stdout)
+    monkeypatch.setattr(module.sys, "stderr", stderr)
+
+    module._configure_console_streams()
+
+    assert stdout.calls == [{"encoding": "utf-8", "errors": "replace"}]
+    assert stderr.calls == [{"encoding": "utf-8", "errors": "replace"}]
+
+def test_excerpt_uses_unicode_ellipsis_without_mojibake():
+    module = load_module()
+    excerpt = module._excerpt("x" * 300, limit=12)
+    assert excerpt == "x" * 11 + chr(0x2026)
