@@ -90,8 +90,8 @@ use util::{
     paths::{PathMatcher, PathStyle},
     rel_path::{RelPath, rel_path},
     test::{TempTree, marked_text_offsets},
-    uri,
 };
+use util_macros::uri;
 use worktree::WorktreeModelHandle as _;
 
 #[gpui::test]
