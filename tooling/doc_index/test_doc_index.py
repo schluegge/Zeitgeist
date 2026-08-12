@@ -4,6 +4,7 @@ import hashlib
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 import importlib.util
 import json
+import os
 from pathlib import Path
 import socket
 import subprocess
@@ -846,3 +847,24 @@ def test_ollama_embedder_defaults_to_128_input_batches():
 
     assert vectors.shape == (256, 2)
     assert [len(request["json"]["input"]) for request in requests] == [128, 128]
+
+
+def test_console_configuration_tolerates_unencodable_unicode():
+    script = (
+        "import doc_index; "
+        "doc_index._configure_console_streams(); "
+        "print('done ✓')"
+    )
+    environment = os.environ.copy()
+    environment["PYTHONIOENCODING"] = "cp1252"
+    completed = subprocess.run(
+        [sys.executable, "-c", script],
+        cwd=MODULE_PATH.parent,
+        env=environment,
+        capture_output=True,
+        text=True,
+        encoding="cp1252",
+    )
+
+    assert completed.returncode == 0, completed.stderr
+    assert "done ?" in completed.stdout

@@ -19,10 +19,11 @@ From the Zeitgeist repository root:
 uv run --project tooling/doc_index zeitgeist-doc-index build `
   --repo zed=C:\path\to\zed `
   --repo glass=C:\path\to\Glass `
-  --repo zeitgeist=C:\path\to\Zeitgeist
+  --repo zeitgeist=C:\path\to\Zeitgeist `
+  --include "crates/**/docs/**/*.md"
 ```
 
-Each repository contributes `docs/**/*.md` by default. Add another Markdown corpus explicitly with `--include`:
+Each repository contributes `docs/**/*.md` by default. The comparative research build above also includes crate-local design documentation, which is where Glass keeps its Workspace Modes design. Add other Markdown corpora explicitly with `--include`:
 
 ```powershell
 uv run --project tooling/doc_index zeitgeist-doc-index build `
