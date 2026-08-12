@@ -7,9 +7,15 @@ import sqlite3
 from pathlib import Path
 
 STATUSES = {"CLAIMED", "RUNNING", "BLOCKED", "COMPLETED", "ABANDONED"}
+COLUMNS = (
+    "task_id", "run_id", "worker_id", "claimed_at", "lease_expires_at",
+    "branch", "worktree", "status", "heartbeat_at", "base_branch",
+    "base_sha", "result_sha", "finished_at", "tests", "evidence",
+    "remaining_blockers", "next_dependency",
+)
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS leases (
-    task_id TEXT PRIMARY KEY,
+    task_id TEXT NOT NULL,
     run_id TEXT NOT NULL,
     worker_id TEXT NOT NULL,
     claimed_at TEXT NOT NULL,
@@ -25,9 +31,11 @@ CREATE TABLE IF NOT EXISTS leases (
     tests TEXT,
     evidence TEXT,
     remaining_blockers TEXT,
-    next_dependency TEXT
+    next_dependency TEXT,
+    PRIMARY KEY (task_id, run_id)
 )
 """
+
 
 def utcnow() -> dt.datetime:
     return dt.datetime.now(dt.timezone.utc)
@@ -37,23 +45,65 @@ def iso(value: dt.datetime) -> str:
     return value.isoformat()
 
 
+def ensure_schema(connection: sqlite3.Connection) -> None:
+    row = connection.execute(
+        "SELECT name FROM sqlite_master WHERE type='table' AND name='leases'"
+    ).fetchone()
+    if row is None:
+        connection.execute(SCHEMA)
+        return
+    info = connection.execute("PRAGMA table_info(leases)").fetchall()
+    primary_key = [
+        item[1] for item in sorted(info, key=lambda item: item[5]) if item[5]
+    ]
+    if primary_key == ["task_id", "run_id"]:
+        return
+    if primary_key != ["task_id"]:
+        raise RuntimeError(f"Unsupported leases primary key: {primary_key}")
+
+    names = ", ".join(COLUMNS)
+    connection.execute("BEGIN IMMEDIATE")
+    try:
+        connection.execute("ALTER TABLE leases RENAME TO leases_legacy_v1")
+        connection.execute(SCHEMA)
+        connection.execute(
+            f"INSERT INTO leases ({names}) SELECT {names} FROM leases_legacy_v1"
+        )
+        connection.execute("DROP TABLE leases_legacy_v1")
+        connection.execute("COMMIT")
+    except Exception:
+        connection.execute("ROLLBACK")
+        raise
+
+
 def connect(path: Path) -> sqlite3.Connection:
     path.parent.mkdir(parents=True, exist_ok=True)
     connection = sqlite3.connect(path, timeout=15, isolation_level=None)
     connection.execute("PRAGMA journal_mode=WAL")
-    connection.execute(SCHEMA)
+    ensure_schema(connection)
     return connection
 
 
-def get_row(connection: sqlite3.Connection, task_id: str):
+def get_latest_row(connection: sqlite3.Connection, task_id: str):
     connection.row_factory = sqlite3.Row
     return connection.execute(
-        "SELECT * FROM leases WHERE task_id = ?", (task_id,)
+        "SELECT * FROM leases WHERE task_id = ? ORDER BY claimed_at DESC LIMIT 1",
+        (task_id,),
+    ).fetchone()
+
+
+def get_unfinished_row(connection: sqlite3.Connection, task_id: str):
+    connection.row_factory = sqlite3.Row
+    return connection.execute(
+        """SELECT * FROM leases
+        WHERE task_id = ? AND status IN ('CLAIMED', 'RUNNING')
+        ORDER BY claimed_at DESC LIMIT 1""",
+        (task_id,),
     ).fetchone()
 
 
 def active(row, now: dt.datetime) -> bool:
-    if row is None or row["status"] in {"COMPLETED", "ABANDONED", "BLOCKED"}:
+    if row is None:
         return False
     return dt.datetime.fromisoformat(row["lease_expires_at"]) > now
 
@@ -63,21 +113,24 @@ def claim(args: argparse.Namespace) -> int:
     connection = connect(args.db)
     try:
         connection.execute("BEGIN IMMEDIATE")
-        row = get_row(connection, args.task_id)
+        row = get_unfinished_row(connection, args.task_id)
         if active(row, now):
             print(json.dumps(dict(row), indent=2))
             connection.execute("ROLLBACK")
             return 2
-        if (
-            row is not None
-            and row["status"] in {"CLAIMED", "RUNNING"}
-            and not args.recover_stale
-        ):
+        if row is not None and not args.recover_stale:
             print(json.dumps(dict(row), indent=2))
             connection.execute("ROLLBACK")
             return 4
+        existing = connection.execute(
+            "SELECT 1 FROM leases WHERE task_id=? AND run_id=?",
+            (args.task_id, args.run_id),
+        ).fetchone()
+        if existing is not None:
+            connection.execute("ROLLBACK")
+            return 5
         connection.execute(
-            """INSERT OR REPLACE INTO leases
+            """INSERT INTO leases
             (task_id, run_id, worker_id, claimed_at, lease_expires_at, branch,
              worktree, status, heartbeat_at, base_branch, base_sha)
             VALUES (?, ?, ?, ?, ?, ?, ?, 'CLAIMED', ?, ?, ?)""",
@@ -85,10 +138,11 @@ def claim(args: argparse.Namespace) -> int:
              args.branch, args.worktree, iso(now), args.base_branch, args.base_sha),
         )
         connection.execute("COMMIT")
-        print(json.dumps(dict(get_row(connection, args.task_id)), indent=2))
+        print(json.dumps(dict(get_latest_row(connection, args.task_id)), indent=2))
         return 0
     finally:
         connection.close()
+
 
 def heartbeat(args: argparse.Namespace) -> int:
     now = utcnow()
@@ -118,6 +172,7 @@ def finish(args: argparse.Namespace) -> int:
     )
     connection.close()
     return 0 if cursor.rowcount == 1 else 3
+
 
 def list_rows(args: argparse.Namespace) -> int:
     connection = connect(args.db)
