@@ -4935,6 +4935,7 @@ impl Workspace {
         for dock in docks {
             if let Some(panel_index) = dock.read(cx).panel_index_for_type::<T>() {
                 let mut focus_center = false;
+                #[cfg(target_os = "macos")]
                 let mut sidebar_section_to_select = None;
                 let panel = dock.update(cx, |dock, cx| {
                     dock.activate_panel(panel_index, window, cx);
@@ -5023,7 +5024,7 @@ impl Workspace {
     }
 
     pub fn set_terminal_session_manager(&mut self, manager: Entity<TerminalSessionManager>) {
-        self.terminal_session_manager = Some(manager.clone());
+        self.terminal_session_manager = Some(manager);
     }
 
     fn dismiss_zoomed_items_to_reveal(
@@ -6545,24 +6546,21 @@ impl Workspace {
             return self.shared_mode_views.get(&mode_id);
         }
 
-        if !self.per_workspace_mode_views.contains_key(&mode_id) {
+        if let hash_map::Entry::Vacant(entry) = self.per_workspace_mode_views.entry(mode_id) {
             let factory = ModeViewRegistry::try_global(cx)
                 .and_then(|reg| reg.factory(mode_id))
                 .cloned();
             if let Some(factory) = factory {
                 let registered = factory(cx);
 
-                self.per_workspace_mode_views.insert(
-                    mode_id,
-                    PerWorkspaceModeView {
-                        view: registered.view,
-                        _sidebar_view: registered.sidebar_view,
-                        focus_handle: registered.focus_handle,
-                        navigation_host: registered.navigation_host,
-                        on_activate: registered.on_activate,
-                        on_deactivate: registered.on_deactivate,
-                    },
-                );
+                entry.insert(PerWorkspaceModeView {
+                    view: registered.view,
+                    _sidebar_view: registered.sidebar_view,
+                    focus_handle: registered.focus_handle,
+                    navigation_host: registered.navigation_host,
+                    on_activate: registered.on_activate,
+                    on_deactivate: registered.on_deactivate,
+                });
             }
         }
         self.mode_view_entry(mode_id)
@@ -6716,6 +6714,7 @@ impl Workspace {
             })
     }
 
+    #[cfg(target_os = "macos")]
     fn sidebar_section_for_panel_key(panel_key: &str) -> Option<WorkspaceSidebarSection> {
         match panel_key {
             "ProjectPanel" => Some(WorkspaceSidebarSection::Project),

@@ -558,7 +558,7 @@ impl MultiWorkspace {
 
         cx.subscribe(workspace, |this, workspace, event, cx| {
             if let WorkspaceEvent::Activate = event {
-                this.set_active_workspace(workspace.clone(), cx);
+                this.set_active_workspace(workspace, cx);
                 this.serialize(cx);
             }
         })
@@ -984,7 +984,7 @@ impl MultiWorkspace {
             cx.notify();
             return;
         }
-        let new_index = self.add_workspace(workspace.clone(), cx);
+        let new_index = self.add_workspace(workspace, cx);
         let changed = self.active_workspace_index != new_index;
         self.active_workspace_index = new_index;
         self.workspace().update(cx, |workspace, cx| {

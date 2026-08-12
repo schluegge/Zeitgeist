@@ -148,7 +148,7 @@ impl RenderOnce for SidebarNavigationList {
                             .color(Color::Muted)
                             .into_any_element()
                     } else {
-                        let close_id = id.clone();
+                        let close_id = id;
                         IconButton::new(
                             SharedString::from(format!("{}-close", close_id.as_ref())),
                             IconName::Close,
