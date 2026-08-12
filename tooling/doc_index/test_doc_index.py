@@ -808,3 +808,41 @@ def test_chunk_markdown_splits_oversized_fence_into_balanced_fences():
     for _heading, text in chunks:
         recovered_lines.extend(text.splitlines()[1:-1])
     assert recovered_lines == body_lines
+
+
+def test_ollama_embedder_splits_inputs_into_bounded_batches():
+    response = json.dumps({"embeddings": [[3.0, 4.0], [0.0, 2.0]]}).encode()
+    server, requests = start_embed_server(response)
+    try:
+        embedder = require_type("OllamaEmbedder")(
+            base_url=f"http://127.0.0.1:{server.server_port}",
+            model="bge-m3",
+            batch_size=2,
+        )
+        vectors = embedder.embed(["one", "two", "three", "four"])
+    finally:
+        server.shutdown()
+        server.server_close()
+
+    assert vectors.shape == (4, 2)
+    assert [request["json"]["input"] for request in requests] == [
+        ["one", "two"],
+        ["three", "four"],
+    ]
+
+
+def test_ollama_embedder_defaults_to_128_input_batches():
+    response = json.dumps({"embeddings": [[1.0, 0.0]] * 128}).encode()
+    server, requests = start_embed_server(response)
+    try:
+        embedder = require_type("OllamaEmbedder")(
+            base_url=f"http://127.0.0.1:{server.server_port}",
+            model="bge-m3",
+        )
+        vectors = embedder.embed([f"text-{index}" for index in range(256)])
+    finally:
+        server.shutdown()
+        server.server_close()
+
+    assert vectors.shape == (256, 2)
+    assert [len(request["json"]["input"]) for request in requests] == [128, 128]

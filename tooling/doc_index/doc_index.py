@@ -309,14 +309,25 @@ class OllamaEmbedder:
         base_url: str = "http://localhost:11434",
         model: str = "bge-m3",
         timeout_seconds: float = 60.0,
+        batch_size: int = 128,
     ) -> None:
         self.base_url = base_url.rstrip("/")
         self.model = model
         self.timeout_seconds = timeout_seconds
+        self.batch_size = batch_size
 
     def embed(self, texts: Sequence[str]) -> np.ndarray:
         if not texts:
             raise ValueError("at least one text is required for embedding")
+        if len(texts) > self.batch_size:
+            batches = [
+                self.embed(texts[start : start + self.batch_size])
+                for start in range(0, len(texts), self.batch_size)
+            ]
+            dimensions = {batch.shape[1] for batch in batches}
+            if len(dimensions) != 1:
+                raise RuntimeError("Ollama embedding dimension mismatch across batches")
+            return np.concatenate(batches, axis=0).astype(np.float32, copy=False)
         payload = json.dumps(
             {"model": self.model, "input": list(texts), "truncate": False}
         ).encode("utf-8")
