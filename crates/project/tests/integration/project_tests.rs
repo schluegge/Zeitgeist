@@ -240,6 +240,57 @@ async fn test_symlinks(cx: &mut gpui::TestAppContext) {
 }
 
 #[gpui::test]
+async fn test_obsidian_vault_readonly_smoke(cx: &mut gpui::TestAppContext) {
+    init_test(cx);
+    cx.executor().allow_parking();
+    let note = "---\ntags: [zeitgeist, obsidian]\n---\n# Note\n[[Target]]\n![[attachment.txt]]\n";
+    let canvas = r#"{"nodes":[{"id":"n1","type":"text","text":"Hello","x":0,"y":0,"width":200,"height":100}],"edges":[]}"#;
+    let dir = TempTree::new(json!({
+        "Vault": {
+            ".obsidian": { "app.json": "{}" },
+            "Note.md": note,
+            "Target.md": "# Target\n",
+            "attachment.txt": "attachment bytes\n",
+            "Board.canvas": canvas,
+        }
+    }));
+    let vault = dir.path().join("Vault");
+    let fixture_paths = [
+        ".obsidian/app.json",
+        "Note.md",
+        "Target.md",
+        "attachment.txt",
+        "Board.canvas",
+    ];
+    let before = fixture_paths.map(|path| std::fs::read(vault.join(path)).unwrap());
+    let project = Project::test(
+        Arc::new(RealFs::new(None, cx.executor())),
+        [vault.as_path()],
+        cx,
+    )
+    .await;
+    let worktree = project.update(cx, |project, cx| project.worktrees(cx).next().unwrap());
+    cx.executor().run_until_parked();
+    let buffer = project
+        .update(cx, |project, cx| {
+            project.open_buffer((worktree.read(cx).id(), rel_path("Note.md")), cx)
+        })
+        .await
+        .unwrap();
+    assert_eq!(buffer.read_with(cx, |buffer, _| buffer.text()), note);
+    assert!(worktree.read_with(cx, |tree, _| {
+        tree.entry_for_path(rel_path("Board.canvas")).is_some()
+    }));
+    assert!(worktree.read_with(cx, |tree, _| {
+        tree.entry_for_path(rel_path(".obsidian/app.json"))
+            .is_some()
+    }));
+    for (path, expected_bytes) in fixture_paths.into_iter().zip(before) {
+        assert_eq!(std::fs::read(vault.join(path)).unwrap(), expected_bytes);
+    }
+}
+
+#[gpui::test]
 async fn test_editorconfig_support(cx: &mut gpui::TestAppContext) {
     init_test(cx);
 
