@@ -666,3 +666,109 @@ def test_search_index_uses_stable_row_order_for_ties(tmp_path: Path):
     )
 
     assert [result.chunk.text for result in results] == ["Primary", "Secondary"]
+
+
+class CliEmbedder:
+    model = "bge-m3"
+
+    def embed(self, texts):
+        rows = []
+        for index, _text in enumerate(texts):
+            rows.append([1.0, 0.0] if index == 0 else [0.0, 1.0])
+        return np.asarray(rows, dtype=np.float32)
+
+
+def test_default_index_dir_uses_localappdata(monkeypatch, tmp_path: Path):
+    module = load_module()
+    default_index_dir = getattr(module, "default_index_dir", None)
+    if not callable(default_index_dir):
+        pytest.fail("default_index_dir is not implemented yet")
+    monkeypatch.setenv("LOCALAPPDATA", str(tmp_path))
+
+    assert default_index_dir() == tmp_path / "Zeitgeist" / "doc-index"
+
+
+def test_cli_build_and_search_print_ranked_source_details(tmp_path: Path, monkeypatch, capsys):
+    module = load_module()
+    main = getattr(module, "main", None)
+    if not callable(main):
+        pytest.fail("main is not implemented yet")
+    monkeypatch.setattr(module, "OllamaEmbedder", CliEmbedder)
+    repo = tmp_path / "repo"
+    commit = make_documented_repo(repo, {"docs/a.md": "# Alpha\n\nSemantic content."})
+    index_dir = tmp_path / "index"
+
+    build_code = main([
+        "build",
+        "--repo", f"zed={repo}",
+        "--index-dir", str(index_dir),
+    ])
+    build_output = capsys.readouterr()
+    assert build_code == 0
+    assert "Built 1 unique chunks" in build_output.out
+
+    search_code = main([
+        "search",
+        "semantic topic",
+        "--index-dir", str(index_dir),
+        "--top-k", "1",
+    ])
+    search_output = capsys.readouterr()
+    assert search_code == 0
+    assert "1.0000" in search_output.out
+    assert f"zed@{commit[:10]}" in search_output.out
+    assert "docs/a.md" in search_output.out
+    assert "Alpha" in search_output.out
+    assert "Semantic content." in search_output.out
+
+
+def test_cli_rejects_non_positive_top_k(tmp_path: Path, monkeypatch, capsys):
+    module = load_module()
+    main = getattr(module, "main", None)
+    if not callable(main):
+        pytest.fail("main is not implemented yet")
+    monkeypatch.setattr(module, "OllamaEmbedder", CliEmbedder)
+
+    code = main(["search", "query", "--index-dir", str(tmp_path / "missing"), "--top-k", "0"])
+    output = capsys.readouterr()
+
+    assert code != 0
+    assert "top-k" in output.err.lower()
+
+
+def test_cli_search_warns_when_indexed_repo_state_is_stale(tmp_path: Path, monkeypatch, capsys):
+    module = load_module()
+    main = getattr(module, "main", None)
+    if not callable(main):
+        pytest.fail("main is not implemented yet")
+    monkeypatch.setattr(module, "OllamaEmbedder", CliEmbedder)
+    repo = tmp_path / "repo"
+    make_documented_repo(repo, {"docs/a.md": "# Alpha\n\nSemantic content."})
+    index_dir = tmp_path / "index"
+    assert main(["build", "--repo", f"zed={repo}", "--index-dir", str(index_dir)]) == 0
+    capsys.readouterr()
+    (repo / "docs" / "a.md").write_text(
+        "# Alpha\n\nChanged after indexing.", encoding="utf-8"
+    )
+
+    code = main(["search", "semantic", "--index-dir", str(index_dir)])
+    output = capsys.readouterr()
+
+    assert code == 0
+    assert "WARNING" in output.err
+    assert "stale" in output.err.lower()
+    assert "zed" in output.err
+
+
+def test_console_entrypoint_is_installed_in_uv_project():
+    project_dir = MODULE_PATH.parent
+    completed = subprocess.run(
+        ["uv", "run", "--project", str(project_dir), "zeitgeist-doc-index", "--help"],
+        cwd=project_dir,
+        capture_output=True,
+        text=True,
+    )
+
+    assert completed.returncode == 0, completed.stderr
+    assert "build" in completed.stdout
+    assert "search" in completed.stdout

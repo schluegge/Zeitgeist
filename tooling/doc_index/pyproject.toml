@@ -10,6 +10,12 @@ dependencies = [
 [project.scripts]
 zeitgeist-doc-index = "doc_index:main"
 
+[tool.uv]
+package = true
+
+[tool.setuptools]
+py-modules = ["doc_index"]
+
 [dependency-groups]
 dev = [
     "pytest>=8.3",

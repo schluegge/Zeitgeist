@@ -4,12 +4,14 @@ from dataclasses import asdict, dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
 from collections.abc import Sequence
+import argparse
 import hashlib
 import json
 import os
 import re
 import shutil
 import subprocess
+import sys
 import tempfile
 import uuid
 from urllib import error as urllib_error
@@ -551,7 +553,7 @@ def search_index(
     if not query.strip():
         raise ValueError("query must not be empty")
     if top_k <= 0:
-        raise ValueError("top_k must be positive")
+        raise ValueError("top-k must be positive")
     model = getattr(embedder, "model", None)
     if not isinstance(model, str) or not model:
         raise RuntimeError("embedding provider did not expose a model name")
@@ -589,3 +591,101 @@ def search_index(
         SearchResult(float(scores[row_index]), chunks[row_index], matched_locations)
         for row_index, matched_locations in candidates[:top_k]
     ]
+
+
+def default_index_dir() -> Path:
+    local_app_data = os.environ.get("LOCALAPPDATA")
+    if not local_app_data:
+        raise RuntimeError("LOCALAPPDATA is not set; pass --index-dir explicitly")
+    return Path(local_app_data) / "Zeitgeist" / "doc-index"
+
+
+def _stale_repository_messages(manifest: IndexManifest) -> list[str]:
+    messages: list[str] = []
+    for indexed in manifest.repositories:
+        name = str(indexed.get("name", ""))
+        path = Path(str(indexed.get("path", "")))
+        try:
+            current = read_git_state(name, path)
+        except (subprocess.CalledProcessError, OSError):
+            messages.append(f"index source {name} is stale: repository is unavailable at {path}")
+            continue
+        indexed_commit = str(indexed.get("commit", ""))
+        indexed_dirty = bool(indexed.get("dirty", False))
+        if current.commit != indexed_commit or current.dirty != indexed_dirty:
+            messages.append(
+                f"index source {name} is stale: indexed {indexed_commit[:10]} "
+                f"dirty={indexed_dirty}; current {current.commit[:10]} dirty={current.dirty}"
+            )
+    return messages
+
+
+def _excerpt(text: str, limit: int = 240) -> str:
+    compact = " ".join(text.split())
+    if len(compact) <= limit:
+        return compact
+    return compact[: limit - 1].rstrip() + "…"
+
+
+def _print_search_results(results: Sequence[SearchResult]) -> None:
+    for rank, result in enumerate(results, start=1):
+        print(f"{rank}. {result.score:.4f}")
+        for location in result.matched_locations:
+            dirty_marker = "*" if location.dirty else ""
+            heading = f"  # {location.heading}" if location.heading else ""
+            print(
+                f"   {location.repo}@{location.commit[:10]}{dirty_marker}  "
+                f"{location.relative_path}{heading}"
+            )
+        print(f"   {_excerpt(result.chunk.text)}")
+
+
+def _argument_parser() -> argparse.ArgumentParser:
+    parser = argparse.ArgumentParser(prog="zeitgeist-doc-index")
+    subparsers = parser.add_subparsers(dest="command", required=True)
+    build_parser = subparsers.add_parser("build", help="build a complete documentation index")
+    build_parser.add_argument("--repo", action="append", required=True, metavar="NAME=PATH")
+    build_parser.add_argument("--include", action="append", default=[], metavar="GLOB")
+    build_parser.add_argument("--index-dir", type=Path)
+
+    search_parser = subparsers.add_parser("search", help="search the persisted documentation index")
+    search_parser.add_argument("query")
+    search_parser.add_argument("--repo", action="append", default=[], metavar="NAME")
+    search_parser.add_argument("--top-k", type=int, default=10)
+    search_parser.add_argument("--index-dir", type=Path)
+    return parser
+
+
+def main(argv: Sequence[str] | None = None) -> int:
+    parser = _argument_parser()
+    try:
+        args = parser.parse_args(argv)
+    except SystemExit as exc:
+        return int(exc.code)
+
+    try:
+        index_dir = args.index_dir if args.index_dir is not None else default_index_dir()
+        embedder = OllamaEmbedder()
+        if args.command == "build":
+            manifest = build_index(args.repo, args.include, index_dir, embedder)
+            print(f"Built {manifest.chunk_count} unique chunks at {index_dir}")
+            return 0
+
+        if args.top_k <= 0:
+            raise ValueError("top-k must be positive")
+        manifest, _chunks, _vectors = load_index(index_dir, expected_model=embedder.model)
+        for message in _stale_repository_messages(manifest):
+            print(f"WARNING: {message}", file=sys.stderr)
+        results = search_index(args.query, index_dir, embedder, args.repo, args.top_k)
+        if results:
+            _print_search_results(results)
+        else:
+            print("No matching documentation chunks.")
+        return 0
+    except (ValueError, RuntimeError, OSError, subprocess.CalledProcessError) as exc:
+        print(f"error: {exc}", file=sys.stderr)
+        return 1
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())
