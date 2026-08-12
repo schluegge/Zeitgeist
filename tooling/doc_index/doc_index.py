@@ -1,12 +1,16 @@
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from collections.abc import Sequence
 import hashlib
 import json
+import os
 import re
+import shutil
 import subprocess
+import tempfile
+import uuid
 from urllib import error as urllib_error
 from urllib import request as urllib_request
 
@@ -36,6 +40,17 @@ class ChunkRecord:
     content_hash: str
     text: str
     locations: list[ChunkLocation] = field(default_factory=list)
+
+
+@dataclass(frozen=True)
+class IndexManifest:
+    schema_version: int
+    model: str
+    vector_dimension: int
+    chunk_count: int
+    built_at: str
+    repositories: list[dict]
+    include_globs: list[str]
 
 
 def discover_markdown(repo_path: Path, include_globs: Sequence[str]) -> list[Path]:
@@ -308,3 +323,132 @@ class OllamaEmbedder:
             raise RuntimeError("Ollama embedding response contained a zero vector")
         normalized = vectors / norms[:, np.newaxis]
         return normalized.astype(np.float32, copy=False)
+
+
+def _validate_index_components(
+    manifest: IndexManifest,
+    chunks: Sequence[ChunkRecord],
+    vectors: np.ndarray,
+    error_type=ValueError,
+) -> None:
+    if vectors.ndim != 2:
+        raise error_type("vectors must be a two-dimensional matrix")
+    if vectors.shape[0] != len(chunks):
+        raise error_type("vector row count does not match chunk count")
+    if manifest.chunk_count != len(chunks):
+        raise error_type("manifest chunk count does not match chunks")
+    if vectors.shape[1] != manifest.vector_dimension:
+        raise error_type("manifest vector dimension does not match vectors")
+    if vectors.dtype != np.float32:
+        raise error_type("vectors must use float32 dtype")
+    if not np.isfinite(vectors).all():
+        raise error_type("vectors contain non-finite values")
+    if len(chunks):
+        norms = np.linalg.norm(vectors, axis=1)
+        if not np.allclose(norms, 1.0, atol=1e-5):
+            raise error_type("vectors must be L2-normalized")
+
+
+def _record_to_dict(record: ChunkRecord) -> dict:
+    return {
+        "content_hash": record.content_hash,
+        "text": record.text,
+        "locations": [asdict(location) for location in record.locations],
+    }
+
+
+def _record_from_dict(raw: dict) -> ChunkRecord:
+    try:
+        locations = [ChunkLocation(**location) for location in raw["locations"]]
+        return ChunkRecord(
+            content_hash=str(raw["content_hash"]),
+            text=str(raw["text"]),
+            locations=locations,
+        )
+    except (KeyError, TypeError, ValueError) as exc:
+        raise RuntimeError("chunks metadata is invalid") from exc
+
+
+def write_index(
+    index_dir: Path,
+    manifest: IndexManifest,
+    chunks: Sequence[ChunkRecord],
+    vectors: np.ndarray,
+) -> None:
+    _validate_index_components(manifest, chunks, vectors)
+    index_dir = Path(index_dir)
+    index_dir.parent.mkdir(parents=True, exist_ok=True)
+    staging = Path(tempfile.mkdtemp(prefix=f".{index_dir.name}.staging-", dir=index_dir.parent))
+    backup = index_dir.parent / f".{index_dir.name}.backup-{uuid.uuid4().hex}"
+    try:
+        (staging / "manifest.json").write_text(
+            json.dumps(asdict(manifest), indent=2, sort_keys=True) + "\n",
+            encoding="utf-8",
+        )
+        with (staging / "chunks.jsonl").open("w", encoding="utf-8", newline="\n") as handle:
+            for record in chunks:
+                handle.write(json.dumps(_record_to_dict(record), sort_keys=True, ensure_ascii=False))
+                handle.write("\n")
+        np.save(staging / "vectors.npy", vectors, allow_pickle=False)
+
+        load_index(staging, expected_model=manifest.model)
+
+        had_previous = index_dir.exists()
+        if had_previous:
+            os.replace(index_dir, backup)
+        try:
+            os.replace(staging, index_dir)
+        except Exception:
+            if had_previous and backup.exists() and not index_dir.exists():
+                os.replace(backup, index_dir)
+            raise
+        if backup.exists():
+            shutil.rmtree(backup)
+    finally:
+        if staging.exists():
+            shutil.rmtree(staging, ignore_errors=True)
+        if backup.exists() and index_dir.exists():
+            shutil.rmtree(backup, ignore_errors=True)
+
+
+def load_index(
+    index_dir: Path,
+    expected_model: str = "bge-m3",
+) -> tuple[IndexManifest, list[ChunkRecord], np.ndarray]:
+    index_dir = Path(index_dir)
+    try:
+        raw_manifest = json.loads((index_dir / "manifest.json").read_text(encoding="utf-8"))
+        manifest = IndexManifest(**raw_manifest)
+    except (OSError, json.JSONDecodeError, TypeError) as exc:
+        raise RuntimeError("index manifest is missing or invalid") from exc
+
+    if manifest.schema_version != 1:
+        raise RuntimeError(f"unsupported index schema version: {manifest.schema_version}")
+    if manifest.model != expected_model:
+        raise RuntimeError(
+            f"index embedding model {manifest.model!r} does not match expected model {expected_model!r}"
+        )
+
+    chunks: list[ChunkRecord] = []
+    try:
+        with (index_dir / "chunks.jsonl").open("r", encoding="utf-8") as handle:
+            for line_number, line in enumerate(handle, start=1):
+                if not line.strip():
+                    continue
+                raw_record = json.loads(line)
+                chunks.append(_record_from_dict(raw_record))
+    except (OSError, json.JSONDecodeError, RuntimeError) as exc:
+        raise RuntimeError("index chunks metadata is missing or invalid") from exc
+
+    for record in chunks:
+        expected_hash = hashlib.sha256(record.text.encode("utf-8")).hexdigest()
+        if record.content_hash != expected_hash:
+            raise RuntimeError("index chunks metadata contains a content hash mismatch")
+
+    try:
+        vectors = np.load(index_dir / "vectors.npy", allow_pickle=False)
+    except (OSError, ValueError) as exc:
+        raise RuntimeError("index vectors are missing or invalid") from exc
+
+    _validate_index_components(manifest, chunks, vectors, error_type=RuntimeError)
+    return manifest, chunks, vectors

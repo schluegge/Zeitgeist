@@ -261,3 +261,130 @@ def test_ollama_embedder_reports_unavailable_endpoint():
 
     with pytest.raises(RuntimeError, match="Ollama"):
         embedder.embed(["text"])
+
+
+def make_persistence_fixture(module, text: str = "Alpha"):
+    location = module.ChunkLocation(
+        repo="zed",
+        commit="a" * 40,
+        dirty=False,
+        relative_path="docs/a.md",
+        chunk_index=0,
+        heading="A",
+    )
+    chunk = module.ChunkRecord(
+        content_hash=hashlib.sha256(text.encode("utf-8")).hexdigest(),
+        text=text,
+        locations=[location],
+    )
+    manifest = module.IndexManifest(
+        schema_version=1,
+        model="bge-m3",
+        vector_dimension=2,
+        chunk_count=1,
+        built_at="2026-08-13T00:00:00+00:00",
+        repositories=[{"name": "zed", "path": "C:/zed", "commit": "a" * 40, "dirty": False}],
+        include_globs=["docs/**/*.md"],
+    )
+    vectors = np.asarray([[1.0, 0.0]], dtype=np.float32)
+    return manifest, [chunk], vectors
+
+
+def test_persistence_round_trip(tmp_path: Path):
+    module = load_module()
+    if not hasattr(module, "IndexManifest"):
+        pytest.fail("IndexManifest is not implemented yet")
+    write_index = getattr(module, "write_index", None)
+    load_index = getattr(module, "load_index", None)
+    if not callable(write_index) or not callable(load_index):
+        pytest.fail("write_index/load_index are not implemented yet")
+    manifest, chunks, vectors = make_persistence_fixture(module)
+    index_dir = tmp_path / "index"
+
+    write_index(index_dir, manifest, chunks, vectors)
+    loaded_manifest, loaded_chunks, loaded_vectors = load_index(index_dir)
+
+    assert loaded_manifest == manifest
+    assert loaded_chunks == chunks
+    assert loaded_vectors.dtype == np.float32
+    assert np.array_equal(loaded_vectors, vectors)
+
+
+def test_write_index_rejects_row_mismatch(tmp_path: Path):
+    module = load_module()
+    write_index = getattr(module, "write_index", None)
+    if not callable(write_index) or not hasattr(module, "IndexManifest"):
+        pytest.fail("persistence is not implemented yet")
+    manifest, chunks, _ = make_persistence_fixture(module)
+    bad_vectors = np.asarray([[1.0, 0.0], [0.0, 1.0]], dtype=np.float32)
+    with pytest.raises(ValueError, match="row"):
+        write_index(tmp_path / "index", manifest, chunks, bad_vectors)
+
+
+def test_load_index_rejects_schema_and_model_mismatch(tmp_path: Path):
+    module = load_module()
+    if not hasattr(module, "IndexManifest"):
+        pytest.fail("IndexManifest is not implemented yet")
+    write_index = getattr(module, "write_index", None)
+    load_index = getattr(module, "load_index", None)
+    if not callable(write_index) or not callable(load_index):
+        pytest.fail("persistence is not implemented yet")
+    manifest, chunks, vectors = make_persistence_fixture(module)
+    index_dir = tmp_path / "index"
+    write_index(index_dir, manifest, chunks, vectors)
+
+    manifest_path = index_dir / "manifest.json"
+    raw = json.loads(manifest_path.read_text(encoding="utf-8"))
+    raw["schema_version"] = 999
+    manifest_path.write_text(json.dumps(raw), encoding="utf-8")
+    with pytest.raises(RuntimeError, match="schema"):
+        load_index(index_dir)
+
+    raw["schema_version"] = 1
+    raw["model"] = "other-model"
+    manifest_path.write_text(json.dumps(raw), encoding="utf-8")
+    with pytest.raises(RuntimeError, match="model"):
+        load_index(index_dir)
+
+
+def test_load_index_rejects_corrupted_jsonl(tmp_path: Path):
+    module = load_module()
+    if not hasattr(module, "IndexManifest"):
+        pytest.fail("IndexManifest is not implemented yet")
+    write_index = getattr(module, "write_index", None)
+    load_index = getattr(module, "load_index", None)
+    if not callable(write_index) or not callable(load_index):
+        pytest.fail("persistence is not implemented yet")
+    manifest, chunks, vectors = make_persistence_fixture(module)
+    index_dir = tmp_path / "index"
+    write_index(index_dir, manifest, chunks, vectors)
+    (index_dir / "chunks.jsonl").write_text("{broken\n", encoding="utf-8")
+
+    with pytest.raises(RuntimeError, match="chunks"):
+        load_index(index_dir)
+
+
+def test_failed_staged_write_preserves_previous_index(tmp_path: Path, monkeypatch):
+    module = load_module()
+    if not hasattr(module, "IndexManifest"):
+        pytest.fail("IndexManifest is not implemented yet")
+    write_index = getattr(module, "write_index", None)
+    load_index = getattr(module, "load_index", None)
+    if not callable(write_index) or not callable(load_index):
+        pytest.fail("persistence is not implemented yet")
+    manifest, chunks, vectors = make_persistence_fixture(module, "Old")
+    index_dir = tmp_path / "index"
+    write_index(index_dir, manifest, chunks, vectors)
+
+    def fail_save(*args, **kwargs):
+        raise OSError("simulated write failure")
+
+    monkeypatch.setattr(module.np, "save", fail_save)
+    new_manifest, new_chunks, new_vectors = make_persistence_fixture(module, "New")
+    with pytest.raises(OSError, match="simulated"):
+        write_index(index_dir, new_manifest, new_chunks, new_vectors)
+
+    loaded_manifest, loaded_chunks, loaded_vectors = load_index(index_dir)
+    assert loaded_chunks[0].text == "Old"
+    assert loaded_manifest.chunk_count == 1
+    assert np.array_equal(loaded_vectors, vectors)
