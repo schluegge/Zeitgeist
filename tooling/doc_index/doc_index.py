@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import asdict, dataclass, field
+from datetime import datetime, timezone
 from pathlib import Path
 from collections.abc import Sequence
 import hashlib
@@ -452,3 +453,82 @@ def load_index(
 
     _validate_index_components(manifest, chunks, vectors, error_type=RuntimeError)
     return manifest, chunks, vectors
+
+
+DEFAULT_INCLUDE_GLOB = "docs/**/*.md"
+
+
+def _parse_repo_specs(repo_specs: Sequence[str]) -> list[SourceRepo]:
+    if not repo_specs:
+        raise ValueError("at least one --repo NAME=PATH value is required")
+    repositories: list[SourceRepo] = []
+    names: set[str] = set()
+    for spec in repo_specs:
+        if "=" not in spec:
+            raise ValueError(f"repository must use NAME=PATH syntax: {spec!r}")
+        name, raw_path = spec.split("=", 1)
+        name = name.strip()
+        raw_path = raw_path.strip()
+        if not name or not raw_path:
+            raise ValueError(f"repository must use NAME=PATH syntax: {spec!r}")
+        if name in names:
+            raise ValueError(f"duplicate repository name: {name}")
+        path = Path(raw_path).expanduser().resolve()
+        if not path.exists():
+            raise ValueError(f"repository path does not exist: {path}")
+        if not path.is_dir():
+            raise ValueError(f"repository path is not a directory: {path}")
+        try:
+            repository = read_git_state(name, path)
+        except (subprocess.CalledProcessError, OSError) as exc:
+            raise ValueError(f"repository path is not a readable Git checkout: {path}") from exc
+        names.add(name)
+        repositories.append(repository)
+    return sorted(repositories, key=lambda item: item.name)
+
+
+def _effective_include_globs(include_globs: Sequence[str]) -> list[str]:
+    result = [DEFAULT_INCLUDE_GLOB]
+    for pattern in include_globs:
+        if pattern and pattern not in result:
+            result.append(pattern)
+    return result
+
+
+def build_index(
+    repo_specs: Sequence[str],
+    include_globs: Sequence[str],
+    index_dir: Path,
+    embedder: OllamaEmbedder,
+) -> IndexManifest:
+    repositories = _parse_repo_specs(repo_specs)
+    effective_globs = _effective_include_globs(include_globs)
+    chunks = collect_chunks(repositories, effective_globs)
+    if not chunks:
+        raise ValueError("documentation corpus produced no Markdown chunks")
+    vectors = embedder.embed([chunk.text for chunk in chunks])
+    if vectors.ndim != 2 or vectors.shape[0] != len(chunks):
+        raise RuntimeError("embedding matrix shape does not match collected chunks")
+    model = getattr(embedder, "model", None)
+    if not isinstance(model, str) or not model:
+        raise RuntimeError("embedding provider did not expose a model name")
+
+    manifest = IndexManifest(
+        schema_version=1,
+        model=model,
+        vector_dimension=int(vectors.shape[1]),
+        chunk_count=len(chunks),
+        built_at=datetime.now(timezone.utc).isoformat(),
+        repositories=[
+            {
+                "name": repository.name,
+                "path": str(repository.path),
+                "commit": repository.commit,
+                "dirty": repository.dirty,
+            }
+            for repository in repositories
+        ],
+        include_globs=effective_globs,
+    )
+    write_index(Path(index_dir), manifest, chunks, vectors)
+    return manifest

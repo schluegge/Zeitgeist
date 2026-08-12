@@ -388,3 +388,151 @@ def test_failed_staged_write_preserves_previous_index(tmp_path: Path, monkeypatc
     assert loaded_chunks[0].text == "Old"
     assert loaded_manifest.chunk_count == 1
     assert np.array_equal(loaded_vectors, vectors)
+
+
+class FakeEmbedder:
+    model = "bge-m3"
+
+    def embed(self, texts):
+        rows = []
+        for index, _text in enumerate(texts):
+            rows.append([1.0, 0.0] if index % 2 == 0 else [0.0, 1.0])
+        return np.asarray(rows, dtype=np.float32)
+
+
+def make_documented_repo(path: Path, files: dict[str, str]) -> str:
+    make_git_repo(path)
+    for relative_path, content in files.items():
+        target = path / relative_path
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_text(content, encoding="utf-8")
+    return commit_all(path)
+
+
+def test_build_index_uses_docs_glob_and_preserves_source_bytes(tmp_path: Path):
+    module = load_module()
+    build_index = getattr(module, "build_index", None)
+    if not callable(build_index):
+        pytest.fail("build_index is not implemented yet")
+    repo = tmp_path / "repo"
+    make_documented_repo(repo, {
+        "docs/a.md": "# Alpha\n\nDocumentation body.",
+        "README.md": "# Root\n\nNot in default corpus.",
+    })
+    before = {
+        path.relative_to(repo).as_posix(): path.read_bytes()
+        for path in repo.rglob("*")
+        if path.is_file() and ".git" not in path.parts
+    }
+    index_dir = tmp_path / "index"
+
+    manifest = build_index([f"zed={repo}"], [], index_dir, FakeEmbedder())
+    loaded_manifest, chunks, _vectors = module.load_index(index_dir)
+
+    assert manifest.chunk_count == 1
+    assert loaded_manifest.include_globs == ["docs/**/*.md"]
+    assert [chunk.text for chunk in chunks] == ["Documentation body."]
+    after = {
+        path.relative_to(repo).as_posix(): path.read_bytes()
+        for path in repo.rglob("*")
+        if path.is_file() and ".git" not in path.parts
+    }
+    assert after == before
+
+
+def test_build_index_additional_include_extends_default_corpus(tmp_path: Path):
+    module = load_module()
+    build_index = getattr(module, "build_index", None)
+    if not callable(build_index):
+        pytest.fail("build_index is not implemented yet")
+    repo = tmp_path / "repo"
+    make_documented_repo(repo, {
+        "docs/a.md": "# A\n\nAlpha",
+        "notes/b.md": "# B\n\nBeta",
+    })
+    index_dir = tmp_path / "index"
+    manifest = build_index(
+        [f"zed={repo}"], ["notes/**/*.md"], index_dir, FakeEmbedder()
+    )
+    _loaded_manifest, chunks, _vectors = module.load_index(index_dir)
+
+    assert manifest.chunk_count == 2
+    assert manifest.include_globs == ["docs/**/*.md", "notes/**/*.md"]
+    assert [chunk.text for chunk in chunks] == ["Alpha", "Beta"]
+
+
+@pytest.mark.parametrize(
+    "repo_specs",
+    [
+        ["missing-equals"],
+        ["=C:/missing"],
+        ["zed="],
+    ],
+)
+def test_build_index_rejects_malformed_repo_specs(tmp_path: Path, repo_specs):
+    build_index = getattr(load_module(), "build_index", None)
+    if not callable(build_index):
+        pytest.fail("build_index is not implemented yet")
+    with pytest.raises(ValueError, match="NAME=PATH"):
+        build_index(repo_specs, [], tmp_path / "index", FakeEmbedder())
+
+
+def test_build_index_rejects_duplicate_repo_names(tmp_path: Path):
+    module = load_module()
+    build_index = getattr(module, "build_index", None)
+    if not callable(build_index):
+        pytest.fail("build_index is not implemented yet")
+    first = tmp_path / "first"
+    second = tmp_path / "second"
+    make_documented_repo(first, {"docs/a.md": "# A\n\nAlpha"})
+    make_documented_repo(second, {"docs/b.md": "# B\n\nBeta"})
+
+    with pytest.raises(ValueError, match="duplicate"):
+        build_index(
+            [f"zed={first}", f"zed={second}"],
+            [],
+            tmp_path / "index",
+            FakeEmbedder(),
+        )
+
+
+def test_build_index_rebuild_has_identical_chunk_mappings(tmp_path: Path):
+    module = load_module()
+    build_index = getattr(module, "build_index", None)
+    if not callable(build_index):
+        pytest.fail("build_index is not implemented yet")
+    repo = tmp_path / "repo"
+    make_documented_repo(repo, {
+        "docs/a.md": "# A\n\nAlpha",
+        "docs/b.md": "# B\n\nBeta",
+    })
+    first_dir = tmp_path / "first-index"
+    second_dir = tmp_path / "second-index"
+    build_index([f"zed={repo}"], [], first_dir, FakeEmbedder())
+    build_index([f"zed={repo}"], [], second_dir, FakeEmbedder())
+    _m1, first_chunks, _v1 = module.load_index(first_dir)
+    _m2, second_chunks, _v2 = module.load_index(second_dir)
+
+    first_mapping = [
+        (chunk.content_hash, chunk.text, [vars(location) for location in chunk.locations])
+        for chunk in first_chunks
+    ]
+    second_mapping = [
+        (chunk.content_hash, chunk.text, [vars(location) for location in chunk.locations])
+        for chunk in second_chunks
+    ]
+    assert first_mapping == second_mapping
+
+
+def test_build_index_rejects_missing_and_non_git_paths(tmp_path: Path):
+    build_index = getattr(load_module(), "build_index", None)
+    if not callable(build_index):
+        pytest.fail("build_index is not implemented yet")
+
+    with pytest.raises(ValueError, match="does not exist"):
+        build_index([f"zed={tmp_path / 'missing'}"], [], tmp_path / "index-a", FakeEmbedder())
+
+    non_git = tmp_path / "not-git"
+    non_git.mkdir()
+    with pytest.raises(ValueError, match="Git"):
+        build_index([f"zed={non_git}"], [], tmp_path / "index-b", FakeEmbedder())
