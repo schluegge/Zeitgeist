@@ -1,6 +1,6 @@
 # Repository
 
-This is a fork of zed-industries/zed. **NEVER push branches, create PRs, or interact with the upstream `zed-industries/zed` repo.** All branches and PRs must target `Glass-HQ/Glass` only. When using `gh pr create`, always pass `--repo Glass-HQ/Glass`.
+This repository descends from `zed-industries/zed` through `Glass-HQ/Glass`. Treat both upstream repositories as read-only: **NEVER push branches, create PRs, or otherwise write to `zed-industries/zed` or `Glass-HQ/Glass`.** Publish Zeitgeist branches and pull requests only to the user-owned repository `schluegge/Zeitgeist` (`origin`). When using `gh pr create`, always pass `--repo schluegge/Zeitgeist`.
 
 # Rust coding guidelines
 
