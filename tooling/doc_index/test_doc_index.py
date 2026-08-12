@@ -536,3 +536,133 @@ def test_build_index_rejects_missing_and_non_git_paths(tmp_path: Path):
     non_git.mkdir()
     with pytest.raises(ValueError, match="Git"):
         build_index([f"zed={non_git}"], [], tmp_path / "index-b", FakeEmbedder())
+
+
+class FixedQueryEmbedder:
+    model = "bge-m3"
+
+    def __init__(self, vector):
+        self.vector = np.asarray(vector, dtype=np.float32)
+
+    def embed(self, texts):
+        assert len(texts) == 1
+        vector = self.vector / np.linalg.norm(self.vector)
+        return vector[np.newaxis, :].astype(np.float32)
+
+
+def make_search_fixture(module, index_dir: Path):
+    def location(repo: str, path: str):
+        return module.ChunkLocation(
+            repo=repo,
+            commit=("a" if repo == "zed" else "b") * 40,
+            dirty=False,
+            relative_path=path,
+            chunk_index=0,
+            heading="Topic",
+        )
+
+    texts = ["Primary", "Secondary", "Orthogonal"]
+    chunks = [
+        module.ChunkRecord(hashlib.sha256(text.encode()).hexdigest(), text, [])
+        for text in texts
+    ]
+    chunks[0].locations = [
+        location("glass", "docs/shared.md"),
+        location("zed", "docs/shared.md"),
+    ]
+    chunks[1].locations = [location("glass", "docs/secondary.md")]
+    chunks[2].locations = [location("zed", "docs/orthogonal.md")]
+    vectors = np.asarray(
+        [[1.0, 0.0], [0.8, 0.6], [0.0, 1.0]], dtype=np.float32
+    )
+    manifest = module.IndexManifest(
+        schema_version=1,
+        model="bge-m3",
+        vector_dimension=2,
+        chunk_count=3,
+        built_at="2026-08-13T00:00:00+00:00",
+        repositories=[
+            {"name": "glass", "path": "C:/glass", "commit": "b" * 40, "dirty": False},
+            {"name": "zed", "path": "C:/zed", "commit": "a" * 40, "dirty": False},
+        ],
+        include_globs=["docs/**/*.md"],
+    )
+    module.write_index(index_dir, manifest, chunks, vectors)
+    return chunks
+
+
+def test_search_index_orders_by_cosine_and_respects_top_k(tmp_path: Path):
+    module = load_module()
+    search_index = getattr(module, "search_index", None)
+    if not callable(search_index):
+        pytest.fail("search_index is not implemented yet")
+    index_dir = tmp_path / "index"
+    make_search_fixture(module, index_dir)
+
+    results = search_index(
+        "closest topic",
+        index_dir,
+        FixedQueryEmbedder([1.0, 0.0]),
+        [],
+        2,
+    )
+
+    assert [result.chunk.text for result in results] == ["Primary", "Secondary"]
+    assert results[0].score == pytest.approx(1.0)
+    assert results[1].score == pytest.approx(0.8)
+
+
+def test_search_index_filters_locations_by_repository(tmp_path: Path):
+    module = load_module()
+    search_index = getattr(module, "search_index", None)
+    if not callable(search_index):
+        pytest.fail("search_index is not implemented yet")
+    index_dir = tmp_path / "index"
+    make_search_fixture(module, index_dir)
+    results = search_index(
+        "closest topic",
+        index_dir,
+        FixedQueryEmbedder([1.0, 0.0]),
+        ["zed"],
+        10,
+    )
+
+    assert [result.chunk.text for result in results] == ["Primary", "Orthogonal"]
+    assert [[location.repo for location in result.matched_locations] for result in results] == [
+        ["zed"],
+        ["zed"],
+    ]
+
+
+def test_search_index_rejects_unknown_repository_filter(tmp_path: Path):
+    module = load_module()
+    search_index = getattr(module, "search_index", None)
+    if not callable(search_index):
+        pytest.fail("search_index is not implemented yet")
+    index_dir = tmp_path / "index"
+    make_search_fixture(module, index_dir)
+
+    with pytest.raises(ValueError, match="unknown repository"):
+        search_index("topic", index_dir, FixedQueryEmbedder([1.0, 0.0]), ["missing"], 5)
+
+
+def test_search_index_uses_stable_row_order_for_ties(tmp_path: Path):
+    module = load_module()
+    search_index = getattr(module, "search_index", None)
+    if not callable(search_index):
+        pytest.fail("search_index is not implemented yet")
+    index_dir = tmp_path / "index"
+    chunks = make_search_fixture(module, index_dir)
+    manifest, _loaded_chunks, vectors = module.load_index(index_dir)
+    vectors[1] = vectors[0]
+    module.write_index(index_dir, manifest, chunks, vectors)
+
+    results = search_index(
+        "tie",
+        index_dir,
+        FixedQueryEmbedder([1.0, 0.0]),
+        [],
+        2,
+    )
+
+    assert [result.chunk.text for result in results] == ["Primary", "Secondary"]

@@ -54,6 +54,13 @@ class IndexManifest:
     include_globs: list[str]
 
 
+@dataclass
+class SearchResult:
+    score: float
+    chunk: ChunkRecord
+    matched_locations: list[ChunkLocation]
+
+
 def discover_markdown(repo_path: Path, include_globs: Sequence[str]) -> list[Path]:
     discovered: dict[str, Path] = {}
     for pattern in include_globs:
@@ -532,3 +539,53 @@ def build_index(
     )
     write_index(Path(index_dir), manifest, chunks, vectors)
     return manifest
+
+
+def search_index(
+    query: str,
+    index_dir: Path,
+    embedder: OllamaEmbedder,
+    repo_filters: Sequence[str],
+    top_k: int,
+) -> list[SearchResult]:
+    if not query.strip():
+        raise ValueError("query must not be empty")
+    if top_k <= 0:
+        raise ValueError("top_k must be positive")
+    model = getattr(embedder, "model", None)
+    if not isinstance(model, str) or not model:
+        raise RuntimeError("embedding provider did not expose a model name")
+
+    manifest, chunks, vectors = load_index(Path(index_dir), expected_model=model)
+    available_repositories = {str(repo["name"]) for repo in manifest.repositories}
+    requested_repositories = list(dict.fromkeys(repo_filters))
+    unknown = sorted(set(requested_repositories) - available_repositories)
+    if unknown:
+        raise ValueError(f"unknown repository filter: {', '.join(unknown)}")
+    query_matrix = embedder.embed([query])
+    if query_matrix.ndim != 2 or query_matrix.shape != (1, manifest.vector_dimension):
+        raise RuntimeError("query embedding dimension does not match persisted index")
+    query_vector = np.asarray(query_matrix[0], dtype=np.float32)
+    if not np.isfinite(query_vector).all():
+        raise RuntimeError("query embedding contains non-finite values")
+    norm = float(np.linalg.norm(query_vector))
+    if norm == 0.0:
+        raise RuntimeError("query embedding is a zero vector")
+    query_vector = query_vector / norm
+
+    scores = vectors @ query_vector
+    candidates: list[tuple[int, list[ChunkLocation]]] = []
+    requested_set = set(requested_repositories)
+    for row_index, chunk in enumerate(chunks):
+        if requested_set:
+            matched = [location for location in chunk.locations if location.repo in requested_set]
+        else:
+            matched = list(chunk.locations)
+        if matched:
+            candidates.append((row_index, matched))
+
+    candidates.sort(key=lambda item: (-float(scores[item[0]]), item[0]))
+    return [
+        SearchResult(float(scores[row_index]), chunks[row_index], matched_locations)
+        for row_index, matched_locations in candidates[:top_k]
+    ]
