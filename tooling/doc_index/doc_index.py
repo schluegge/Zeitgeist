@@ -1,0 +1,187 @@
+from __future__ import annotations
+
+from dataclasses import dataclass, field
+from pathlib import Path
+from collections.abc import Sequence
+import re
+
+
+@dataclass(frozen=True)
+class SourceRepo:
+    name: str
+    path: Path
+    commit: str
+    dirty: bool
+
+
+@dataclass(frozen=True)
+class ChunkLocation:
+    repo: str
+    commit: str
+    dirty: bool
+    relative_path: str
+    chunk_index: int
+    heading: str
+
+
+@dataclass
+class ChunkRecord:
+    content_hash: str
+    text: str
+    locations: list[ChunkLocation] = field(default_factory=list)
+
+
+def discover_markdown(repo_path: Path, include_globs: Sequence[str]) -> list[Path]:
+    discovered: dict[str, Path] = {}
+    for pattern in include_globs:
+        for path in repo_path.glob(pattern):
+            if path.is_file() and path.suffix.lower() == ".md":
+                relative = path.relative_to(repo_path).as_posix()
+                discovered[relative] = path
+    return [discovered[key] for key in sorted(discovered)]
+
+
+def _heading_path(headings: list[str | None]) -> str:
+    return " > ".join(heading for heading in headings if heading)
+
+
+def _split_blocks(lines: list[str]) -> list[str]:
+    blocks: list[str] = []
+    current: list[str] = []
+    fence: str | None = None
+
+    def flush() -> None:
+        text = "\n".join(current).strip()
+        if text:
+            blocks.append(text)
+        current.clear()
+
+    for line in lines:
+        stripped = line.lstrip()
+        marker = None
+        if stripped.startswith("```"):
+            marker = "```"
+        elif stripped.startswith("~~~"):
+            marker = "~~~"
+
+        if marker is not None:
+            if fence is None:
+                fence = marker
+            elif fence == marker:
+                fence = None
+            current.append(line)
+            continue
+
+        if not line.strip() and fence is None:
+            flush()
+        else:
+            current.append(line)
+
+    flush()
+    return blocks
+
+
+def _split_plain_text(text: str, max_chars: int, overlap_chars: int) -> list[str]:
+    if len(text) <= max_chars:
+        return [text]
+    pieces: list[str] = []
+    start = 0
+    while start < len(text):
+        end = min(start + max_chars, len(text))
+        if end < len(text):
+            split_at = text.rfind(" ", start + max_chars // 2, end)
+            if split_at > start:
+                end = split_at
+        piece = text[start:end].strip()
+        if piece:
+            pieces.append(piece)
+        if end >= len(text):
+            break
+        next_start = max(end - overlap_chars, start + 1)
+        start = next_start
+    return pieces
+
+
+def _pack_blocks(blocks: list[str], max_chars: int, overlap_chars: int) -> list[str]:
+    packed: list[str] = []
+    current = ""
+    for block in blocks:
+        if block.startswith(("```", "~~~")):
+            pieces = [block]
+        else:
+            pieces = _split_plain_text(block, max_chars, overlap_chars)
+        for piece in pieces:
+            candidate = piece if not current else f"{current}\n\n{piece}"
+            if len(candidate) <= max_chars:
+                current = candidate
+                continue
+            if current:
+                packed.append(current)
+            overlap = packed[-1][-overlap_chars:].strip() if packed and overlap_chars else ""
+            current = f"{overlap}\n\n{piece}".strip() if overlap else piece
+            if len(current) > max_chars and overlap:
+                allowance = max(max_chars - len(piece) - 2, 0)
+                overlap = overlap[-allowance:] if allowance else ""
+                current = f"{overlap}\n\n{piece}".strip() if overlap else piece
+    if current:
+        packed.append(current)
+    return packed
+
+
+def chunk_markdown(
+    text: str,
+    max_chars: int = 3500,
+    overlap_chars: int = 300,
+) -> list[tuple[str, str]]:
+    if max_chars <= 0:
+        raise ValueError("max_chars must be positive")
+    if overlap_chars < 0 or overlap_chars >= max_chars:
+        raise ValueError("overlap_chars must be non-negative and smaller than max_chars")
+
+    headings: list[str | None] = []
+    section_lines: list[str] = []
+    sections: list[tuple[str, list[str]]] = []
+    fence: str | None = None
+
+    def flush_section() -> None:
+        if any(line.strip() for line in section_lines):
+            sections.append((_heading_path(headings), list(section_lines)))
+        section_lines.clear()
+
+    for line in text.splitlines():
+        stripped = line.lstrip()
+        marker = None
+        if stripped.startswith("```"):
+            marker = "```"
+        elif stripped.startswith("~~~"):
+            marker = "~~~"
+
+        if marker is not None:
+            if fence is None:
+                fence = marker
+            elif fence == marker:
+                fence = None
+            section_lines.append(line)
+            continue
+
+        heading_match = re.match(r"^(#{1,6})\s+(.+?)\s*$", line) if fence is None else None
+        if heading_match:
+            flush_section()
+            level = len(heading_match.group(1))
+            title = heading_match.group(2).strip()
+            if len(headings) < level:
+                headings.extend([None] * (level - len(headings)))
+            headings[level - 1] = title
+            del headings[level:]
+            continue
+
+        section_lines.append(line)
+
+    flush_section()
+
+    chunks: list[tuple[str, str]] = []
+    for heading, lines in sections:
+        blocks = _split_blocks(lines)
+        for packed in _pack_blocks(blocks, max_chars, overlap_chars):
+            chunks.append((heading, packed))
+    return chunks

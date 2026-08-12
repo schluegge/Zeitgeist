@@ -1,0 +1,19 @@
+[project]
+name = "zeitgeist-doc-index"
+version = "0.1.0"
+description = "Local semantic documentation index for Zeitgeist research"
+requires-python = ">=3.13"
+dependencies = [
+    "numpy>=2.1",
+]
+
+[project.scripts]
+zeitgeist-doc-index = "doc_index:main"
+
+[dependency-groups]
+dev = [
+    "pytest>=8.3",
+]
+
+[tool.pytest.ini_options]
+addopts = "-ra"
