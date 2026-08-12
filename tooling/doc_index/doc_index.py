@@ -643,7 +643,7 @@ def _configure_console_streams() -> None:
     for stream in (sys.stdout, sys.stderr):
         reconfigure = getattr(stream, "reconfigure", None)
         if callable(reconfigure):
-            reconfigure(errors="replace")
+            reconfigure(encoding="utf-8", errors="replace")
 
 
 def default_index_dir() -> Path:
@@ -677,7 +677,7 @@ def _excerpt(text: str, limit: int = 240) -> str:
     compact = " ".join(text.split())
     if len(compact) <= limit:
         return compact
-    return compact[: limit - 1].rstrip() + "…"
+    return compact[: limit - 1].rstrip() + chr(0x2026)
 
 
 def _print_search_results(results: Sequence[SearchResult]) -> None:
