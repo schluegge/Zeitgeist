@@ -761,12 +761,19 @@ fn resolve_preview_path(url: &str, base_directory: Option<&Path>) -> Option<Path
     }
 
     let base_directory = base_directory?;
-    let resolved = base_directory.join(decoded_url);
+    let resolved = base_directory.join(&decoded_url);
     if resolved.exists() {
-        Some(resolved)
-    } else {
-        None
+        return Some(resolved);
     }
+
+    if Path::new(&decoded_url).extension().is_none() {
+        let markdown_note = base_directory.join(format!("{decoded_url}.md"));
+        if markdown_note.exists() {
+            return Some(markdown_note);
+        }
+    }
+
+    None
 }
 
 fn resolve_preview_image(
@@ -1049,6 +1056,21 @@ mod tests {
             None
         );
         assert_eq!(resolve_preview_path("notes.md", None), None);
+
+        Ok(())
+    }
+
+    #[test]
+    fn resolves_extensionless_markdown_note_paths() -> Result<()> {
+        let temp_dir = TempDir::new()?;
+        let base_directory = temp_dir.path();
+        let file = base_directory.join("Three laws of motion.md");
+        fs::write(&file, "# Three laws of motion")?;
+
+        assert_eq!(
+            resolve_preview_path("Three laws of motion", Some(base_directory)),
+            Some(file)
+        );
 
         Ok(())
     }

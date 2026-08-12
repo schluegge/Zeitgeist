@@ -19,6 +19,7 @@ pub const PARSE_OPTIONS: Options = Options::ENABLE_TABLES
     .union(Options::ENABLE_PLUSES_DELIMITED_METADATA_BLOCKS)
     .union(Options::ENABLE_OLD_FOOTNOTES)
     .union(Options::ENABLE_GFM)
+    .union(Options::ENABLE_WIKILINKS)
     .union(Options::ENABLE_SUPERSCRIPT)
     .union(Options::ENABLE_SUBSCRIPT);
 
@@ -785,8 +786,7 @@ mod tests {
 
     const UNWANTED_OPTIONS: Options = Options::ENABLE_YAML_STYLE_METADATA_BLOCKS
         .union(Options::ENABLE_MATH)
-        .union(Options::ENABLE_DEFINITION_LIST)
-        .union(Options::ENABLE_WIKILINKS);
+        .union(Options::ENABLE_DEFINITION_LIST);
 
     #[test]
     fn all_options_considered() {
@@ -1061,6 +1061,48 @@ mod tests {
                 root_block_starts: vec![27],
                 ..Default::default()
             }
+        );
+    }
+
+    #[test]
+    fn test_basic_wikilinks() {
+        let parsed =
+            parse_markdown_with_options("Before [[Three laws of motion]] after", false, false);
+        assert!(parsed.events.iter().any(|(_, event)| matches!(
+            event,
+            Start(Link { dest_url, .. }) if dest_url.as_ref() == "Three laws of motion"
+        )));
+    }
+
+    #[test]
+    fn test_wikilink_alias_uses_alias_as_display_text() {
+        let markdown = "[[Three laws of motion|Newton]]";
+        let parsed = parse_markdown_with_options(markdown, false, false);
+        assert!(parsed.events.iter().any(|(_, event)| matches!(
+            event,
+            Start(Link { dest_url, .. }) if dest_url.as_ref() == "Three laws of motion"
+        )));
+        assert!(parsed.events.iter().any(
+            |(range, event)| matches!(event, Text) && &markdown[range.clone()] == "Newton"
+        ));
+    }
+
+    #[test]
+    fn test_wikilinks_are_not_parsed_in_code() {
+        let inline = parse_markdown_with_options("`[[note]]`", false, false);
+        assert!(
+            !inline
+                .events
+                .iter()
+                .any(|(_, event)| matches!(event, Start(Link { .. })))
+        );
+
+        let fenced = parse_markdown_with_options("```text\n[[note]]\n```", false, false);
+        assert!(
+            !fenced
+                .events
+                .iter()
+                .any(|(_, event)| matches!(event, Start(Link { .. })))
         );
     }
 
