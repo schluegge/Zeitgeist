@@ -1,4 +1,4 @@
-//! Paths to locations used by Zed.
+//! Paths to locations used by Zeitgeist.
 
 use std::env;
 use std::path::{Path, PathBuf};
@@ -15,7 +15,7 @@ pub const EDITORCONFIG_NAME: &str = ".editorconfig";
 /// and state directory paths.
 ///
 /// Forks should change this to avoid colliding with Zed's user data.
-pub const APP_NAME: &str = "Zed";
+pub const APP_NAME: &str = "Zeitgeist";
 
 /// Lowercased form of [`APP_NAME`], for use in XDG-style paths on
 /// Linux/FreeBSD and the macOS `~/.config` fallback.
@@ -53,16 +53,16 @@ static CUSTOM_DATA_DIR: OnceLock<PathBuf> = OnceLock::new();
 
 /// The resolved data directory, combining custom override or platform defaults.
 /// This is set once and cached for subsequent calls.
-/// On macOS, this is `~/Library/Application Support/Zed`.
-/// On Linux/FreeBSD, this is `$XDG_DATA_HOME/zed`.
-/// On Windows, this is `%LOCALAPPDATA%\Zed`.
+/// On macOS, this is `~/Library/Application Support/Zeitgeist`.
+/// On Linux/FreeBSD, this is `$XDG_DATA_HOME/zeitgeist`.
+/// On Windows, this is `%LOCALAPPDATA%\Zeitgeist`.
 static CURRENT_DATA_DIR: OnceLock<PathBuf> = OnceLock::new();
 
 /// The resolved config directory, combining custom override or platform defaults.
 /// This is set once and cached for subsequent calls.
-/// On macOS, this is `~/.config/zed`.
-/// On Linux/FreeBSD, this is `$XDG_CONFIG_HOME/zed`.
-/// On Windows, this is `%APPDATA%\Zed`.
+/// On macOS, this is `~/.config/zeitgeist`.
+/// On Linux/FreeBSD, this is `$XDG_CONFIG_HOME/zeitgeist`.
+/// On Windows, this is `%APPDATA%\Zeitgeist`.
 static CONFIG_DIR: OnceLock<PathBuf> = OnceLock::new();
 
 /// Returns the relative path to the zed_server directory on the ssh host.
@@ -634,4 +634,50 @@ pub fn global_gitignore_path() -> Option<PathBuf> {
     GLOBAL_GITIGNORE_PATH
         .get_or_init(::ignore::gitignore::gitconfig_excludes_path)
         .clone()
+}
+
+#[cfg(test)]
+mod zeitgeist_path_tests {
+    use super::*;
+
+    #[test]
+    fn user_paths_are_namespaced_to_zeitgeist() {
+        #[cfg(target_os = "windows")]
+        {
+            assert_eq!(
+                config_dir().file_name().and_then(|name| name.to_str()),
+                Some("Zeitgeist")
+            );
+            assert_eq!(
+                data_dir().file_name().and_then(|name| name.to_str()),
+                Some("Zeitgeist")
+            );
+            assert_eq!(
+                state_dir().file_name().and_then(|name| name.to_str()),
+                Some("Zeitgeist")
+            );
+            assert_eq!(
+                temp_dir().file_name().and_then(|name| name.to_str()),
+                Some("Zeitgeist")
+            );
+        }
+        assert_eq!(
+            log_file().file_name().and_then(|name| name.to_str()),
+            Some("Zeitgeist.log")
+        );
+        assert_eq!(
+            old_log_file().file_name().and_then(|name| name.to_str()),
+            Some("Zeitgeist.log.old")
+        );
+    }
+
+    #[test]
+    fn project_and_remote_compatibility_paths_remain_zed_namespaced() {
+        assert_eq!(local_settings_folder_name(), ".zed");
+        assert_eq!(remote_server_dir_relative().as_unix_str(), ".zed_server");
+        assert_eq!(
+            remote_wsl_server_dir_relative().as_unix_str(),
+            ".zed_wsl_server"
+        );
+    }
 }
