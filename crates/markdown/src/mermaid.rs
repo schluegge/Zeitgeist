@@ -306,19 +306,25 @@ mod tests {
             Markdown::new_with_options(markdown.to_string().into(), None, None, options, cx)
         });
         cx.run_until_parked();
-        let (rendered, _) = cx.draw(
-            Default::default(),
-            size(px(600.0), px(600.0)),
-            |_window, _cx| {
-                MarkdownElement::new(markdown, MarkdownStyle::default()).code_block_renderer(
-                    CodeBlockRenderer::Default {
+        let rendered_text = std::rc::Rc::new(std::cell::RefCell::new(None));
+        cx.draw(Default::default(), size(px(600.0), px(600.0)), {
+            let rendered_text = rendered_text.clone();
+            move |_window, _cx| {
+                MarkdownElement::new(markdown, MarkdownStyle::default())
+                    .code_block_renderer(CodeBlockRenderer::Default {
                         copy_button_visibility: CopyButtonVisibility::Hidden,
                         border: false,
-                    },
-                )
-            },
-        );
-        rendered.text
+                    })
+                    .on_render(move |text| {
+                        *rendered_text.borrow_mut() = Some(text);
+                    })
+            }
+        });
+        let rendered = rendered_text
+            .borrow_mut()
+            .take()
+            .expect("markdown element should have been laid out");
+        rendered
     }
 
     fn mock_render_image(cx: &mut TestAppContext) -> Arc<RenderImage> {
@@ -577,17 +583,25 @@ mod tests {
             markdown.mermaid_state.order = vec![contents];
         });
 
-        let (rendered, _) = cx.draw(
-            Default::default(),
-            size(px(600.0), px(600.0)),
-            |_window, _cx| {
-                MarkdownElement::new(markdown.clone(), MarkdownStyle::default())
+        let rendered_text = std::rc::Rc::new(std::cell::RefCell::new(None));
+        let markdown_for_render = markdown.clone();
+        cx.draw(Default::default(), size(px(600.0), px(600.0)), {
+            let rendered_text = rendered_text.clone();
+            move |_window, _cx| {
+                MarkdownElement::new(markdown_for_render.clone(), MarkdownStyle::default())
                     .code_block_renderer(CodeBlockRenderer::Default {
                         copy_button_visibility: CopyButtonVisibility::Hidden,
                         border: false,
                     })
-            },
-        );
+                    .on_render(move |text| {
+                        *rendered_text.borrow_mut() = Some(text);
+                    })
+            }
+        });
+        let rendered = rendered_text
+            .borrow_mut()
+            .take()
+            .expect("markdown element should have been laid out");
 
         let mermaid_diagram = markdown.update(cx, |markdown, _| {
             markdown
@@ -600,13 +614,11 @@ mod tests {
         });
         assert!(
             rendered
-                .text
                 .position_for_source_index(mermaid_diagram.content_range.start)
                 .is_some()
         );
         assert!(
             rendered
-                .text
                 .position_for_source_index(mermaid_diagram.content_range.end.saturating_sub(1))
                 .is_some()
         );

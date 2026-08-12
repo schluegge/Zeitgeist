@@ -959,6 +959,8 @@ pub struct MarkdownElement {
     image_resolver: Option<Box<dyn Fn(&str) -> Option<ImageSource>>>,
     show_root_block_markers: bool,
     autoscroll: AutoscrollBehavior,
+    #[cfg(any(test, feature = "test-support"))]
+    on_render: Option<Box<dyn Fn(RenderedText)>>,
 }
 
 impl MarkdownElement {
@@ -976,6 +978,8 @@ impl MarkdownElement {
             image_resolver: None,
             show_root_block_markers: false,
             autoscroll: AutoscrollBehavior::Propagate,
+            #[cfg(any(test, feature = "test-support"))]
+            on_render: None,
         }
     }
 
@@ -987,13 +991,20 @@ impl MarkdownElement {
     ) -> String {
         use gpui::size;
 
-        let (text, _) = cx.draw(
-            Default::default(),
-            size(px(600.0), px(600.0)),
-            |window, cx| Self::new(markdown, style(window, cx)),
-        );
-        text.text
-            .lines
+        let rendered_text = std::rc::Rc::new(std::cell::RefCell::new(None));
+        cx.draw(Default::default(), size(px(600.0), px(600.0)), {
+            let rendered_text = rendered_text.clone();
+            move |window, cx| {
+                Self::new(markdown, style(window, cx)).on_render(move |text| {
+                    *rendered_text.borrow_mut() = Some(text);
+                })
+            }
+        });
+        let text = rendered_text
+            .borrow_mut()
+            .take()
+            .expect("markdown element should have been laid out");
+        text.lines
             .iter()
             .map(|line| line.layout.wrapped_text())
             .collect::<Vec<_>>()
@@ -1002,6 +1013,12 @@ impl MarkdownElement {
 
     pub fn code_block_renderer(mut self, variant: CodeBlockRenderer) -> Self {
         self.code_block_renderer = variant;
+        self
+    }
+
+    #[cfg(any(test, feature = "test-support"))]
+    pub(crate) fn on_render(mut self, callback: impl Fn(RenderedText) + 'static) -> Self {
+        self.on_render = Some(Box::new(callback));
         self
     }
 
@@ -2132,6 +2149,10 @@ impl Element for MarkdownElement {
                 .update(cx, |markdown, _| markdown.clear_code_block_scroll_handles());
         }
         let mut rendered_markdown = builder.build();
+        #[cfg(any(test, feature = "test-support"))]
+        if let Some(on_render) = self.on_render.as_ref() {
+            on_render(rendered_markdown.text.clone());
+        }
         let child_layout_id = rendered_markdown.element.request_layout(window, cx);
         let layout_id = window.request_layout(gpui::Style::default(), [child_layout_id], cx);
         (layout_id, rendered_markdown)
@@ -3075,19 +3096,24 @@ mod tests {
             )
         });
         cx.run_until_parked();
-        let (rendered, _) = cx.draw(
-            Default::default(),
-            size(px(600.0), px(600.0)),
-            |_window, _cx| {
-                MarkdownElement::new(markdown, MarkdownStyle::default()).code_block_renderer(
-                    CodeBlockRenderer::Default {
+        let rendered_text = std::rc::Rc::new(std::cell::RefCell::new(None));
+        cx.draw(Default::default(), size(px(600.0), px(600.0)), {
+            let rendered_text = rendered_text.clone();
+            move |_window, _cx| {
+                MarkdownElement::new(markdown, MarkdownStyle::default())
+                    .code_block_renderer(CodeBlockRenderer::Default {
                         copy_button_visibility: CopyButtonVisibility::Hidden,
                         border: false,
-                    },
-                )
-            },
-        );
-        rendered.text
+                    })
+                    .on_render(move |text| {
+                        *rendered_text.borrow_mut() = Some(text);
+                    })
+            }
+        });
+        rendered_text
+            .borrow_mut()
+            .take()
+            .expect("markdown element should have been laid out")
     }
 
     #[gpui::test]

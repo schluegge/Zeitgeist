@@ -539,19 +539,25 @@ mod tests {
         let (_, cx) = cx.add_window_view(|_, _| TestWindow);
         let markdown = cx.new(|cx| Markdown::new(markdown.to_string().into(), None, None, cx));
         cx.run_until_parked();
-        let (rendered, _) = cx.draw(
-            Default::default(),
-            size(px(600.0), px(600.0)),
-            |_window, _cx| {
-                MarkdownElement::new(markdown, MarkdownStyle::default()).code_block_renderer(
-                    CodeBlockRenderer::Default {
+        let rendered_text = std::rc::Rc::new(std::cell::RefCell::new(None));
+        cx.draw(Default::default(), size(px(600.0), px(600.0)), {
+            let rendered_text = rendered_text.clone();
+            move |_window, _cx| {
+                MarkdownElement::new(markdown, MarkdownStyle::default())
+                    .code_block_renderer(CodeBlockRenderer::Default {
                         copy_button_visibility: CopyButtonVisibility::Hidden,
                         border: false,
-                    },
-                )
-            },
-        );
-        rendered.text
+                    })
+                    .on_render(move |text| {
+                        *rendered_text.borrow_mut() = Some(text);
+                    })
+            }
+        });
+        let rendered = rendered_text
+            .borrow_mut()
+            .take()
+            .expect("markdown element should have been laid out");
+        rendered
     }
 
     #[gpui::test]
@@ -599,21 +605,26 @@ mod tests {
             )
         });
         cx.run_until_parked();
-        let (rendered, _) = cx.draw(
-            Default::default(),
-            size(px(600.0), px(600.0)),
-            |_window, _cx| {
-                MarkdownElement::new(markdown, MarkdownStyle::default()).code_block_renderer(
-                    CodeBlockRenderer::Default {
+        let rendered_text = std::rc::Rc::new(std::cell::RefCell::new(None));
+        cx.draw(Default::default(), size(px(600.0), px(600.0)), {
+            let rendered_text = rendered_text.clone();
+            move |_window, _cx| {
+                MarkdownElement::new(markdown, MarkdownStyle::default())
+                    .code_block_renderer(CodeBlockRenderer::Default {
                         copy_button_visibility: CopyButtonVisibility::Hidden,
                         border: false,
-                    },
-                )
-            },
-        );
+                    })
+                    .on_render(move |text| {
+                        *rendered_text.borrow_mut() = Some(text);
+                    })
+            }
+        });
+        let rendered = rendered_text
+            .borrow_mut()
+            .take()
+            .expect("markdown element should have been laid out");
 
         let rendered_lines = rendered
-            .text
             .lines
             .iter()
             .map(|line| line.layout.wrapped_text())
