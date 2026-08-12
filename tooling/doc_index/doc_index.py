@@ -3,7 +3,9 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from pathlib import Path
 from collections.abc import Sequence
+import hashlib
 import re
+import subprocess
 
 
 @dataclass(frozen=True)
@@ -185,3 +187,52 @@ def chunk_markdown(
         for packed in _pack_blocks(blocks, max_chars, overlap_chars):
             chunks.append((heading, packed))
     return chunks
+
+
+def _git_output(repo_path: Path, *args: str) -> str:
+    completed = subprocess.run(
+        ["git", "-C", str(repo_path), *args],
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+    return completed.stdout.strip()
+
+
+def read_git_state(name: str, repo_path: Path) -> SourceRepo:
+    commit = _git_output(repo_path, "rev-parse", "HEAD")
+    dirty = bool(_git_output(repo_path, "status", "--porcelain=v1"))
+    return SourceRepo(name=name, path=repo_path, commit=commit, dirty=dirty)
+
+
+def collect_chunks(
+    repositories: Sequence[SourceRepo],
+    include_globs: Sequence[str],
+) -> list[ChunkRecord]:
+    by_hash: dict[str, ChunkRecord] = {}
+    for repository in sorted(repositories, key=lambda item: item.name):
+        for path in discover_markdown(repository.path, include_globs):
+            relative_path = path.relative_to(repository.path).as_posix()
+            markdown = path.read_text(encoding="utf-8")
+            for chunk_index, (heading, chunk_text) in enumerate(chunk_markdown(markdown)):
+                content_hash = hashlib.sha256(chunk_text.encode("utf-8")).hexdigest()
+                location = ChunkLocation(
+                    repo=repository.name,
+                    commit=repository.commit,
+                    dirty=repository.dirty,
+                    relative_path=relative_path,
+                    chunk_index=chunk_index,
+                    heading=heading,
+                )
+                record = by_hash.get(content_hash)
+                if record is None:
+                    by_hash[content_hash] = ChunkRecord(
+                        content_hash=content_hash,
+                        text=chunk_text,
+                        locations=[location],
+                    )
+                else:
+                    if record.text != chunk_text:
+                        raise ValueError(f"SHA-256 collision for chunk {content_hash}")
+                    record.locations.append(location)
+    return list(by_hash.values())
