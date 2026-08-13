@@ -29,6 +29,11 @@ fn checks(profile: VerificationProfile) -> Vec<Check> {
         args: &["fmt", "--all", "--", "--check"],
     }];
 
+    checks.push(Check {
+        id: "project-identity",
+        args: &["xtask", "zeitgeist-identity"],
+    });
+
     if profile == VerificationProfile::Ci {
         checks.push(Check {
             id: "xtask-clippy",
@@ -137,7 +142,12 @@ mod tests {
     fn fast_profile_contains_deterministic_local_checks() {
         assert_eq!(
             ids(VerificationProfile::Fast),
-            ["format", "xtask-tests", "workflow-validation"]
+            [
+                "format",
+                "project-identity",
+                "xtask-tests",
+                "workflow-validation"
+            ]
         );
     }
 
@@ -147,6 +157,7 @@ mod tests {
             ids(VerificationProfile::Ci),
             [
                 "format",
+                "project-identity",
                 "xtask-clippy",
                 "xtask-tests",
                 "workflow-validation"
@@ -191,7 +202,7 @@ mod tests {
         })
         .expect_err("CI verification should stop on the synthetic failure");
 
-        assert_eq!(seen, ["format", "xtask-clippy"]);
+        assert_eq!(seen, ["format", "project-identity", "xtask-clippy"]);
         assert!(error.to_string().contains("xtask-clippy"));
     }
 }
