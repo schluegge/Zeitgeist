@@ -1,49 +1,61 @@
-# Zed
+# Zeitgeist
 
-[![Zed](https://img.shields.io/endpoint?url=https://raw.githubusercontent.com/zed-industries/zed/main/assets/badge/v0.json)](https://zed.dev)
-[![CI](https://github.com/zed-industries/zed/actions/workflows/run_tests.yml/badge.svg)](https://github.com/zed-industries/zed/actions/workflows/run_tests.yml)
+Zeitgeist is a local workspace for knowledge, code, and AI-assisted work. It uses Zed and GPUI as its technical foundation and is being built to open existing Obsidian vaults in place, without migrating them into proprietary storage.
 
-Welcome to Zed, a high-performance, multiplayer code editor from the creators of [Atom](https://github.com/atom/atom) and [Tree-sitter](https://github.com/tree-sitter/tree-sitter).
+Zeitgeist is under active development. Obsidian compatibility is a target, not a claim of complete compatibility today.
 
----
+## Product direction
 
-### Installation
+- **Zed is the technical core.** Zeitgeist reuses the editor, GPUI, project model, Git, terminal, language-server, collaboration, and agent foundations instead of rebuilding an editor platform.
+- **Obsidian is a compatibility target.** Existing Markdown, YAML, links, embeds, attachments, configuration folders, and Canvas files should remain ordinary files and stay the source of truth.
+- **Knowledge and software belong in one local workspace.** Notes, documentation, project context, and code should not require separate storage models.
+- **AI belongs in the workspace.** Agent capabilities should operate against the same local project context rather than a detached proprietary knowledge store.
+- **Glass is a selective donor, not the foundation.** Glass code or UX is reused only when it adds something that is still missing from the Zed-first architecture.
 
-On macOS, Linux, and Windows you can [download Zed directly](https://zed.dev/download) or install Zed via your local package manager ([macOS](https://zed.dev/docs/installation#macos)/[Linux](https://zed.dev/docs/linux#installing-via-a-package-manager)/[Windows](https://zed.dev/docs/windows#package-managers)).
+The canonical product boundary is documented in [Zeitgeist Product Architecture](./docs/architecture/zeitgeist-product-architecture.md).
 
-Other platforms are not yet available:
+## Current evidence-backed baseline
 
-- Web ([tracking discussion](https://github.com/zed-industries/zed/discussions/26195))
+The current Zed-first branch includes a read-only Obsidian-vault smoke test. It opens a fixture containing `.obsidian/app.json`, Markdown with YAML and Obsidian link/embed syntax, an attachment, and a JSON Canvas file.
 
-### Developing Zed
+The test verifies that the Markdown buffer is read unchanged, the hidden Obsidian configuration file and Canvas file remain visible to the project model, and every fixture file remains byte-identical after opening. It does **not** prove wikilink resolution, embed rendering, Canvas rendering, plugin compatibility, or complete Obsidian behavior.
 
-- [Building Zed for macOS](./docs/src/development/macos.md)
-- [Building Zed for Linux](./docs/src/development/linux.md)
-- [Building Zed for Windows](./docs/src/development/windows.md)
+## Development
 
-### Contributing
+The canonical development-system entry point is:
 
-See [CONTRIBUTING.md](./CONTRIBUTING.md) for ways you can contribute to Zed.
+```sh
+cargo xtask zeitgeist-verify
+```
 
-Also... we're hiring! Check out our [jobs](https://zed.dev/jobs) page for open roles.
+For the CI profile:
 
-### Licensing
+```sh
+cargo xtask zeitgeist-verify --profile ci
+```
 
-Zed source code is licensed primarily under GPL-3.0-or-later, with Apache-2.0 components where marked.
+Platform build instructions remain inherited from the Zed codebase while Zeitgeist-specific build documentation is established:
 
-License information for third party dependencies must be correctly provided for CI to pass.
+- [macOS](./docs/src/development/macos.md)
+- [Linux](./docs/src/development/linux.md)
+- [Windows](./docs/src/development/windows.md)
 
-We use [`cargo-about`](https://github.com/EmbarkStudios/cargo-about) to automatically comply with open source licenses. If CI is failing, check the following:
+Development orchestration, source indexing, verification evidence, CI observability, and related SDLC machinery are tooling **for building Zeitgeist**. They are not Zeitgeist product features and must not become application runtime dependencies.
 
-- Is it showing a `no license specified` error for a crate you've created? If so, add `publish = false` under `[package]` in your crate's Cargo.toml.
-- Is the error `failed to satisfy license requirements` for a dependency? If so, first determine what license the project has and whether this system is sufficient to comply with this license's requirements. If you're unsure, ask a lawyer. Once you've verified that this system is acceptable add the license's SPDX identifier to the `accepted` array in `script/licenses/zed-licenses.toml`.
-- Is `cargo-about` unable to find the license for a dependency? If so, add a clarification field at the end of `script/licenses/zed-licenses.toml`, as specified in the [cargo-about book](https://embarkstudios.github.io/cargo-about/cli/generate/config.html#crate-configuration).
+## Upstream relationship
 
-## Sponsorship
+Zeitgeist is Zed-first. Zed is the active technical upstream and architectural base. The GitHub fork ancestry currently passes through Glass, but that ancestry does not define the product architecture.
 
-Zed is developed by **Zed Industries, Inc.**, a for-profit company.
+Glass remains useful as a reference or donor for capabilities that are genuinely absent from Zed. New work should not treat Glass as the base to which Zed is retrofitted.
 
-If you’d like to financially support the project, you can do so via GitHub Sponsors.
-Sponsorships go directly to Zed Industries and are used as general company revenue.
-There are no perks or entitlements associated with sponsorship.
+## Contributing and upstream-derived documentation
 
+Much of the repository is still upstream Zed code and documentation. [CONTRIBUTING.md](./CONTRIBUTING.md) and the platform development guides therefore contain Zed-specific conventions that remain relevant to the inherited codebase.
+
+Zeitgeist-specific architectural decisions take precedence where inherited documentation conflicts with [the canonical Zeitgeist architecture](./docs/architecture/zeitgeist-product-architecture.md).
+
+## Licensing
+
+This repository retains the upstream license structure. Source code is primarily licensed under GPL-3.0-or-later, with Apache-2.0 components where marked. See [LICENSE-GPL](./LICENSE-GPL) and [LICENSE-APACHE](./LICENSE-APACHE).
+
+Third-party dependency license information must remain complete for repository compliance checks.
