@@ -31,6 +31,8 @@ enum CliCommand {
     WebExamples(tasks::web_examples::WebExamplesArgs),
     Workflows(tasks::workflows::GenerateWorkflowArgs),
     CheckWorkflows(tasks::workflow_checks::WorkflowValidationArgs),
+    /// Checks canonical Zeitgeist project identity.
+    ZeitgeistIdentity(tasks::zeitgeist_identity::ZeitgeistIdentityArgs),
     /// Runs Zeitgeist development-system verification checks.
     ZeitgeistVerify(tasks::zeitgeist_verify::ZeitgeistVerifyArgs),
 }
@@ -52,6 +54,7 @@ fn main() -> Result<()> {
         CliCommand::WebExamples(args) => tasks::web_examples::run_web_examples(args),
         CliCommand::Workflows(args) => tasks::workflows::run_workflows(args),
         CliCommand::CheckWorkflows(args) => tasks::workflow_checks::validate(args),
+        CliCommand::ZeitgeistIdentity(args) => tasks::zeitgeist_identity::run(args),
         CliCommand::ZeitgeistVerify(args) => tasks::zeitgeist_verify::run(args),
     }
 }
@@ -59,6 +62,13 @@ fn main() -> Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn parses_zeitgeist_identity_subcommand() {
+        let args = Args::try_parse_from(["cargo-xtask", "zeitgeist-identity"])
+            .expect("Zeitgeist identity subcommand should parse");
+        assert!(matches!(args.command, CliCommand::ZeitgeistIdentity(_)));
+    }
 
     #[test]
     fn parses_zeitgeist_verify_subcommand() {
